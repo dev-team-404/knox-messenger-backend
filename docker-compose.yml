@@ -11,6 +11,9 @@ x-proxy-env: &proxy-env
   HTTP_PROXY: "${HTTP_PROXY:-}"
   HTTPS_PROXY: "${HTTPS_PROXY:-}"
   NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,redis,api-blue,api-green,nginx}"
+  http_proxy: "${HTTP_PROXY:-}"
+  https_proxy: "${HTTPS_PROXY:-}"
+  no_proxy: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,redis,api-blue,api-green,nginx}"
   NODE_TLS_REJECT_UNAUTHORIZED: "0"
 
 x-api-common: &api-common

@@ -3,8 +3,10 @@ FROM node:24-alpine AS builder
 
 ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
 ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
 
 WORKDIR /app
+RUN npm config set strict-ssl false
 COPY package*.json ./
 RUN npm ci --fetch-timeout=120000
 COPY tsconfig.json ./
