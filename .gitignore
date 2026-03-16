@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+.deploy-state
+nginx/active-upstream.conf
+*.log

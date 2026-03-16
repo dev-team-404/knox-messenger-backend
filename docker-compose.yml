@@ -1,0 +1,91 @@
+# ============================================
+# Knox Message Receiver Server - Docker Compose
+# Blue-Green 무중단 배포
+# ============================================
+
+x-timezone: &timezone
+  TZ: Asia/Seoul
+
+x-proxy-env: &proxy-env
+  <<: *timezone
+  HTTP_PROXY: "${HTTP_PROXY:-}"
+  HTTPS_PROXY: "${HTTPS_PROXY:-}"
+  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,redis,api-blue,api-green,nginx}"
+  NODE_TLS_REJECT_UNAUTHORIZED: "0"
+
+x-api-common: &api-common
+  build:
+    context: ./packages/api
+    dockerfile: Dockerfile
+    args:
+      <<: *proxy-env
+  restart: unless-stopped
+  environment:
+    <<: *proxy-env
+    NODE_ENV: production
+    REDIS_URL: redis://redis:6379
+    KNOX_API_BASE_URL: ${KNOX_API_BASE_URL:-}
+    KNOX_ACCESS_TOKEN: ${KNOX_ACCESS_TOKEN:-}
+    KNOX_SYSTEM_ID: ${KNOX_SYSTEM_ID:-}
+    KNOX_DEVICE_ID: ${KNOX_DEVICE_ID:-}
+    KNOX_ENCRYPTION_KEY: ${KNOX_ENCRYPTION_KEY:-}
+    BOT_API_KEY: ${BOT_API_KEY:-}
+    API_PORT: 3000
+  expose:
+    - "3000"
+  depends_on:
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "node", "--input-type=commonjs", "-e", "const h=require('http');h.get('http://localhost:3000/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+    interval: 10s
+    timeout: 3s
+    start_period: 10s
+    retries: 3
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: knox-msg-redis
+    restart: unless-stopped
+    environment:
+      <<: *timezone
+    command: redis-server --appendonly yes
+    volumes:
+      - knox_msg_redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6001}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api-blue:
+    <<: *api-common
+    container_name: knox-msg-api-blue
+
+  api-green:
+    <<: *api-common
+    container_name: knox-msg-api-green
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: knox-msg-proxy
+    restart: unless-stopped
+    environment:
+      <<: *timezone
+    ports:
+      - "${PROXY_PORT:-6000}:6000"
+    volumes:
+      - ./nginx/active-upstream.conf:/etc/nginx/conf.d/upstream.conf:ro
+    depends_on:
+      api-blue:
+        condition: service_healthy
+      api-green:
+        condition: service_healthy
+
+volumes:
+  knox_msg_redis_data:
