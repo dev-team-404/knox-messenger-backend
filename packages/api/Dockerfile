@@ -6,7 +6,7 @@ ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --fetch-timeout=120000
 COPY tsconfig.json ./
 COPY src/ src/
 RUN npx tsc
@@ -14,14 +14,13 @@ RUN npx tsc
 # ── Production ──
 FROM node:24-alpine
 
-ARG HTTP_PROXY HTTPS_PROXY NO_PROXY
-ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}
-
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+
+# devDependencies 제거 (typescript 등)
+RUN npm prune --omit=dev 2>/dev/null; true
 
 RUN addgroup -g 1001 nodejs && adduser -u 1001 -G nodejs -s /bin/sh -D nodejs
 USER nodejs
