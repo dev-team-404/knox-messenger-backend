@@ -1,14 +1,12 @@
 /**
  * POST /message — Knox Messenger 웹훅 수신
  *
- * Knox에서 챗봇 계정으로 메시지가 들어오면 이 엔드포인트를 호출한다.
- * 1. 수신 payload 복호화 (또는 평문 JSON 파싱)
- * 2. senderId로 등록된 Nexus Bot 조회
- * 3. Bot에게 메시지 전달 (비동기 fire-and-forget)
- * 4. Knox에 200 응답
- *
- * Note: Express의 전역 json() 파서를 거치지 않기 위해
- *       이 라우터는 raw text body 파서를 사용한다.
+ * Knox 수신 API 스펙:
+ * - Content-Type: text/plain
+ * - Headers: botUserEmail, botNotiType
+ * - Body: AES256 암호화 + Base64 인코딩된 JSON
+ * - 복호화 후 필드: sender, sentTime, senderName, chatType, chatroomId,
+ *                   msgId, msgType, chatMsg, senderKnoxId
  */
 
 import { Router, text as expressText } from 'express';
@@ -20,8 +18,6 @@ import type { KnoxWebhookPayload, BotTaskRequest } from '../types.js';
 
 export const webhookRouter = Router();
 
-// Knox webhook은 암호화된 raw string으로 올 수 있으므로
-// 모든 Content-Type을 text로 수신
 webhookRouter.post(
   '/message',
   expressText({ type: '*/*', limit: '1mb' }),
@@ -29,12 +25,15 @@ webhookRouter.post(
     try {
       const rawBody = typeof req.body === 'string' ? req.body.trim() : '';
 
-      // ★ Knox webhook raw input 전체 로깅 (형식 파악용)
+      // Knox webhook 헤더 + raw body 전체 로깅
+      const botNotiType = req.headers['botnotitype'] as string || '';
+      const botUserEmail = req.headers['botuseremail'] as string || '';
       wlog.info('Webhook RAW INPUT', {
         contentType: req.headers['content-type'],
+        botUserEmail,
+        botNotiType,
         rawBodyLength: rawBody.length,
         rawBody: rawBody.slice(0, 2000),
-        headers: JSON.stringify(req.headers),
       });
 
       if (!rawBody) {
@@ -43,10 +42,10 @@ webhookRouter.post(
         return;
       }
 
-      // 1차: 복호화 시도 (암호화된 payload)
+      // 1차: 복호화 시도 (AES256 + Base64)
       let payload = decryptPayload<KnoxWebhookPayload>(stripJsonQuotes(rawBody));
 
-      // 2차: 복호화 실패 시 평문 JSON 시도 (일부 Knox 환경에서 평문 전송)
+      // 2차: 복호화 실패 시 평문 JSON 시도
       if (!payload) {
         try {
           payload = JSON.parse(rawBody) as KnoxWebhookPayload;
@@ -57,42 +56,50 @@ webhookRouter.post(
         }
       }
 
-      // ★ 파싱된 payload 전체 로깅 (필드명 확인용)
+      // 파싱된 payload 전체 로깅
       wlog.info('Webhook PARSED PAYLOAD', {
         fields: Object.keys(payload),
         payload: JSON.stringify(payload).slice(0, 2000),
       });
 
-      const { senderId, chatroomId, chatMsg, msgId, senderName } = payload;
-      if (!senderId || !chatMsg) {
-        wlog.warn('Webhook: missing senderId or chatMsg', { senderId, hasChatMsg: !!chatMsg });
+      const { sender, chatroomId, chatMsg, msgId, senderName, senderKnoxId, chatType, msgType } = payload;
+      if (!sender || !chatMsg) {
+        wlog.warn('Webhook: missing sender or chatMsg', { sender, hasChatMsg: !!chatMsg });
         res.sendStatus(200);
         return;
       }
 
       wlog.info('Webhook received', {
-        senderId,
+        sender,
         senderName: senderName || '(unknown)',
+        senderKnoxId: senderKnoxId || '',
         chatroomId,
         msgId,
+        chatType,
+        msgType,
         chatMsg: chatMsg.slice(0, 500),
+        isIntro: botNotiType === 'INTRO',
       });
 
-      // senderId로 등록된 Bot 조회
-      const bot = await getBot(String(senderId));
+      // sender(Knox userId)로 등록된 Bot 조회
+      const bot = await getBot(String(sender));
       if (!bot) {
-        wlog.warn('Webhook: no bot registered for sender', { senderId });
+        wlog.warn('Webhook: no bot registered for sender', { sender, senderKnoxId });
         res.sendStatus(200);
         return;
       }
 
-      // Bot에게 메시지 전달 (비동기 — Knox 응답을 차단하지 않음)
+      // Bot에게 메시지 전달
       const taskRequest: BotTaskRequest = {
         chatroomId: String(chatroomId),
-        senderId: String(senderId),
+        senderId: String(sender),
         senderName: senderName || '',
+        senderKnoxId: senderKnoxId || '',
         message: chatMsg,
         messageId: String(msgId),
+        chatType: chatType || 'SINGLE',
+        msgType: msgType || 'TEXT',
+        isIntro: botNotiType === 'INTRO',
       };
 
       forwardToBot(bot.endpoint, taskRequest).catch((err) => {
@@ -110,10 +117,6 @@ webhookRouter.post(
   },
 );
 
-/**
- * Knox 응답이 JSON string으로 올 수 있음 (따옴표 래핑)
- * "base64string" → base64string
- */
 function stripJsonQuotes(text: string): string {
   if (text.startsWith('"') && text.endsWith('"')) {
     try { return JSON.parse(text) as string; } catch { /* 그대로 */ }
@@ -123,7 +126,7 @@ function stripJsonQuotes(text: string): string {
 
 async function forwardToBot(endpoint: string, task: BotTaskRequest): Promise<void> {
   const url = `${endpoint}/jarvis/message`;
-  wlog.info('Forwarding to bot', { url, chatroomId: task.chatroomId });
+  wlog.info('Forwarding to bot', { url, chatroomId: task.chatroomId, senderId: task.senderId });
 
   const res = await fetch(url, {
     method: 'POST',
