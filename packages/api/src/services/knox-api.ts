@@ -28,8 +28,8 @@ async function knoxFetch(path: string, options?: RequestInit): Promise<Response>
   wlog.info('Knox API call', { method: options?.method || 'GET', path });
   const res = await fetch(url, { ...options, headers: { ...knoxHeaders(), ...options?.headers } });
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    wlog.error('Knox API error', { status: res.status, path, body: text.slice(0, 500) });
+    // body를 소비하지 않음 — caller가 읽어야 하므로 status만 로깅
+    wlog.error('Knox API error', { status: res.status, path });
   }
   return res;
 }
@@ -78,7 +78,8 @@ export async function registerDevice(): Promise<string | null> {
   try {
     const res = await knoxFetch('/messenger/contact/api/v2.0/device/o1/reg');
     const data = await res.json();
-    const deviceId = data?.deviceId || data?.device_id;
+    wlog.info('Knox device registration response', { data });
+    const deviceId = data?.deviceId || data?.device_id || data?.deviceServerID;
     if (deviceId) {
       wlog.info('Knox device registered', { deviceId });
       return String(deviceId);
