@@ -34,7 +34,7 @@ responseRouter.post('/', async (req, res) => {
 
   wlog.info('Bot response received', {
     chatroomId,
-    msgLength: message.length,
+    message: String(message).slice(0, 500),
   });
 
   try {

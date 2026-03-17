@@ -57,9 +57,10 @@ webhookRouter.post(
 
       wlog.info('Webhook received', {
         senderId,
+        senderName: senderName || '(unknown)',
         chatroomId,
-        msgLength: chatMsg.length,
         msgId,
+        chatMsg: chatMsg.slice(0, 500),
       });
 
       // senderId로 등록된 Bot 조회
