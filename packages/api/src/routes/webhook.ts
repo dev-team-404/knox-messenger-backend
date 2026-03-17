@@ -28,9 +28,18 @@ webhookRouter.post(
   async (req, res) => {
     try {
       const rawBody = typeof req.body === 'string' ? req.body.trim() : '';
+
+      // ★ Knox webhook raw input 전체 로깅 (형식 파악용)
+      wlog.info('Webhook RAW INPUT', {
+        contentType: req.headers['content-type'],
+        rawBodyLength: rawBody.length,
+        rawBody: rawBody.slice(0, 2000),
+        headers: JSON.stringify(req.headers),
+      });
+
       if (!rawBody) {
         wlog.warn('Webhook: empty body');
-        res.sendStatus(200); // Knox에 항상 200 (재시도 방지)
+        res.sendStatus(200);
         return;
       }
 
@@ -47,6 +56,12 @@ webhookRouter.post(
           return;
         }
       }
+
+      // ★ 파싱된 payload 전체 로깅 (필드명 확인용)
+      wlog.info('Webhook PARSED PAYLOAD', {
+        fields: Object.keys(payload),
+        payload: JSON.stringify(payload).slice(0, 2000),
+      });
 
       const { senderId, chatroomId, chatMsg, msgId, senderName } = payload;
       if (!senderId || !chatMsg) {
