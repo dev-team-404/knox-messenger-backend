@@ -49,27 +49,49 @@ function decryptResponse<T>(rawText: string): T | null {
 // ─── Knox 초기화 (서버 시작 시 1회) ───
 
 export async function initKnoxApi(): Promise<void> {
+  wlog.info('═══ Knox API 초기화 시작 ═══');
+
+  // Step 1: Access Token + System-ID 확인
   if (!config.knox.apiBaseUrl || !config.knox.accessToken) {
-    wlog.warn('Knox API not configured — skipping initialization');
+    wlog.error('Step 1/3 ✗ Access Token 또는 API Base URL 미설정 — 초기화 중단');
     return;
   }
+  wlog.info('Step 1/3 ✓ Access Token + System-ID 확인 완료', {
+    apiBaseUrl: config.knox.apiBaseUrl,
+    systemId: config.knox.systemId,
+    accessToken: config.knox.accessToken ? `${config.knox.accessToken.slice(0, 8)}...` : 'NOT SET',
+  });
 
-  // 1. Device 미등록이면 등록
+  // Step 2: Device 등록 → Device ID 획득
   if (!config.knox.deviceId) {
+    wlog.info('Step 2/3 디바이스 등록 중...');
     const deviceId = await registerDevice();
     if (deviceId) {
       config.knox.deviceId = deviceId;
-      wlog.info('Knox device ID obtained', { deviceId });
+      wlog.info('Step 2/3 ✓ Device ID 획득 완료', { deviceId });
+    } else {
+      wlog.error('Step 2/3 ✗ Device ID 획득 실패 — 이후 API 호출 불가');
+      return;
     }
+  } else {
+    wlog.info('Step 2/3 ✓ Device ID 이미 설정됨', { deviceId: config.knox.deviceId });
   }
 
-  // 2. Encryption key 미설정이면 조회
+  // Step 3: 암호화 키 조회
   if (!config.knox.encryptionKey) {
+    wlog.info('Step 3/3 암호화 키 조회 중...');
     const key = await refreshEncryptionKey();
     if (key) {
-      wlog.info('Knox encryption key obtained');
+      wlog.info('Step 3/3 ✓ Encryption Key 획득 완료', { keyLength: key.length });
+    } else {
+      wlog.error('Step 3/3 ✗ Encryption Key 획득 실패 — 메시지 암복호화 불가');
+      return;
     }
+  } else {
+    wlog.info('Step 3/3 ✓ Encryption Key 이미 설정됨', { keyLength: config.knox.encryptionKey.length });
   }
+
+  wlog.info('═══ Knox API 초기화 완료 — 대화방 생성/메시지 발신 준비 완료 ═══');
 }
 
 // ─── 디바이스 등록 ───
