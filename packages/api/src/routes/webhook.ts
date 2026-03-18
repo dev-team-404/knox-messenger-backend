@@ -81,8 +81,11 @@ webhookRouter.post(
         isIntro: botNotiType === 'INTRO',
       });
 
-      // sender(Knox userId)로 등록된 Bot 조회
-      const bot = await getBot(String(sender));
+      // senderKnoxId(SSO loginid)로 먼저 조회, 없으면 sender(Knox numeric ID)로 fallback
+      let bot = senderKnoxId ? await getBot(senderKnoxId) : null;
+      if (!bot) {
+        bot = await getBot(String(sender));
+      }
       if (!bot) {
         wlog.warn('Webhook: no bot registered for sender', { sender, senderKnoxId });
         res.sendStatus(200);
