@@ -29,11 +29,17 @@ initiateRouter.post('/', async (req: Request, res: Response) => {
     return;
   }
 
+  const id = Number(receiverId);
+  if (!Number.isFinite(id) || id <= 0) {
+    res.status(400).json({ error: 'Invalid receiverId: must be a positive number' });
+    return;
+  }
+
   wlog.info('Initiate conversation', { receiverId, msgLength: message.length });
 
   try {
     // 1. Create chatroom (BROADCAST SINGLE = 1:1 공지방, chatType 5)
-    const result = await createChatroom([Number(receiverId)], 5);
+    const result = await createChatroom([id], 5);
     if (!result) {
       res.status(502).json({ success: false, error: 'Failed to create chatroom' });
       return;
