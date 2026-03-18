@@ -8,6 +8,7 @@ import { initKnoxApi } from './services/knox-api.js';
 import { webhookRouter } from './routes/webhook.js';
 import { registerRouter } from './routes/register.js';
 import { responseRouter } from './routes/response.js';
+import { initiateRouter } from './routes/initiate.js';
 
 const app = express();
 
@@ -24,6 +25,7 @@ app.use('/api', express.json({ limit: '1mb' }));
 app.use('/', webhookRouter);          // POST /message (Knox webhook, raw text body)
 app.use('/api/bots', registerRouter); // Bot registration CRUD
 app.use('/api/response', responseRouter); // Bot → Knox response
+app.use('/api/initiate', initiateRouter); // Bot → Knox initiate conversation
 
 // ─── Health ───
 app.get('/health', (_req, res) => {
