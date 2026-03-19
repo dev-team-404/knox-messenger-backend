@@ -134,6 +134,36 @@ export async function refreshEncryptionKey(): Promise<string | null> {
   }
 }
 
+// ─── Login ID → Knox 숫자 User ID 검색 ───
+
+export async function searchUserByLoginId(loginId: string): Promise<number | null> {
+  try {
+    const res = await knoxFetch('/messenger/contact/api/v2.0/profile/o1/search/loginid', {
+      method: 'POST',
+      body: JSON.stringify({
+        singleIdList: [{ singleId: loginId }],
+      }),
+    });
+    const data = await res.json() as {
+      userSearchResult?: {
+        searchResultList?: Array<{ userID: number; singleID: string }>;
+      };
+    };
+    const found = data?.userSearchResult?.searchResultList?.find(
+      r => r.singleID === loginId || r.singleID?.toLowerCase() === loginId.toLowerCase()
+    );
+    if (found?.userID) {
+      wlog.info('Knox user ID found', { loginId, userID: found.userID });
+      return found.userID;
+    }
+    wlog.warn('Knox user ID not found for loginId', { loginId, response: data });
+    return null;
+  } catch (err) {
+    wlog.error('Knox searchUserByLoginId failed', { loginId, error: String(err) });
+    return null;
+  }
+}
+
 // ─── 대화방 생성 ───
 
 export async function createChatroom(
@@ -220,6 +250,103 @@ async function sendSingleMessage(chatroomId: number, message: string, retried = 
     return false;
   } catch (err) {
     wlog.error('Knox sendMessage error', { chatroomId, error: String(err) });
+    return false;
+  }
+}
+
+// ─── Adaptive Card 발신 (msgType 19) ───
+
+export async function sendAdaptiveCard(
+  chatroomId: number,
+  card: Record<string, unknown>,
+  retried = false,
+): Promise<{ msgId: number } | null> {
+  const msgId = Date.now();
+  const cardJson = typeof card === 'string' ? card : JSON.stringify(card);
+  const body: KnoxChatRequestBody = {
+    requestId: msgId,
+    chatroomId,
+    chatMessageParams: [{
+      msgId,
+      msgType: 19, // ADAPTIVE_CARD
+      chatMsg: cardJson,
+      msgTtl: 259200,
+    }],
+  };
+
+  try {
+    const encrypted = encryptPayload(body);
+    const res = await knoxFetch('/messenger/message/api/v2.0/message/chatRequest', {
+      method: 'POST',
+      body: encrypted,
+    });
+    const raw = await res.text();
+    const decrypted = decryptResponse<{ result: { code: number } }>(raw);
+
+    if (decrypted && decrypted.result?.code === 1000) {
+      wlog.info('Knox Adaptive Card sent', { chatroomId, msgId });
+      return { msgId };
+    }
+
+    if (!retried && decrypted && decrypted.result?.code === 4003) {
+      wlog.warn('Knox Adaptive Card error 4003: refreshing key');
+      const newKey = await refreshEncryptionKey();
+      if (newKey) return sendAdaptiveCard(chatroomId, card, true);
+    }
+
+    wlog.error('Knox sendAdaptiveCard failed', { chatroomId, response: decrypted });
+    return null;
+  } catch (err) {
+    wlog.error('Knox sendAdaptiveCard error', { chatroomId, error: String(err) });
+    return null;
+  }
+}
+
+// ─── Adaptive Card 업데이트 (msgType 20 — 기존 카드 교체) ───
+
+export async function updateAdaptiveCard(
+  chatroomId: number,
+  originalMsgId: number,
+  card: Record<string, unknown>,
+  retried = false,
+): Promise<boolean> {
+  const msgId = Date.now();
+  const cardJson = typeof card === 'string' ? card : JSON.stringify(card);
+  const body: KnoxChatRequestBody = {
+    requestId: msgId,
+    chatroomId,
+    chatMessageParams: [{
+      msgId: originalMsgId, // 원본 메시지 ID → 이 카드를 교체
+      msgType: 20, // UPDATED_ADAPTIVE_CARD
+      chatMsg: cardJson,
+      msgTtl: 259200,
+    }],
+  };
+
+  try {
+    const encrypted = encryptPayload(body);
+    const res = await knoxFetch('/messenger/message/api/v2.0/message/chatRequest', {
+      method: 'POST',
+      body: encrypted,
+    });
+    const raw = await res.text();
+    const decrypted = decryptResponse<{ result: { code: number } }>(raw);
+
+    if (decrypted && decrypted.result?.code === 1000) {
+      wlog.info('Knox Adaptive Card updated', { chatroomId, originalMsgId });
+      return true;
+    }
+
+    if (!retried && decrypted && decrypted.result?.code === 4003) {
+      wlog.warn('Knox updateAdaptiveCard error 4003: refreshing key');
+      const newKey = await refreshEncryptionKey();
+      if (newKey) return updateAdaptiveCard(chatroomId, originalMsgId, card, true);
+    }
+
+    wlog.error('Knox updateAdaptiveCard failed', { chatroomId, response: decrypted });
+    return false;
+  } catch (err) {
+    wlog.error('Knox updateAdaptiveCard error', { chatroomId, error: String(err) });
     return false;
   }
 }

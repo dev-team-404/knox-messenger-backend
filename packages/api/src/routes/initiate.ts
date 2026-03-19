@@ -7,7 +7,7 @@
  */
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import { createChatroom, sendMessage } from '../services/knox-api.js';
+import { createChatroom, sendMessage, searchUserByLoginId } from '../services/knox-api.js';
 import { config } from '../config.js';
 import { wlog } from '../middleware/logger.js';
 
@@ -29,13 +29,20 @@ initiateRouter.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const id = Number(receiverId);
+  // receiverId: 숫자 ID 또는 loginId(문자열) 둘 다 지원
+  let id = Number(receiverId);
   if (!Number.isFinite(id) || id <= 0) {
-    res.status(400).json({ error: 'Invalid receiverId: must be a positive number' });
-    return;
+    // loginId(문자열)로 간주 → Knox API로 숫자 ID 검색
+    wlog.info('Initiate: receiverId is loginId, searching Knox user ID', { loginId: receiverId });
+    const knoxUserId = await searchUserByLoginId(String(receiverId));
+    if (!knoxUserId) {
+      res.status(400).json({ error: `Knox user not found for loginId: ${receiverId}` });
+      return;
+    }
+    id = knoxUserId;
   }
 
-  wlog.info('Initiate conversation', { receiverId, msgLength: message.length });
+  wlog.info('Initiate conversation', { receiverId, resolvedId: id, msgLength: message.length });
 
   try {
     // 1. Create chatroom (BROADCAST SINGLE = 1:1 공지방, chatType 5)

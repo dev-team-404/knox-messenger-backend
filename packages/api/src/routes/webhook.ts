@@ -92,13 +92,17 @@ webhookRouter.post(
         return;
       }
 
+      // Knox chatMsg에서 HTML 메타데이터 주석 제거
+      // 예: <!-- {"COMMAND":"SNDCL", "SNDCL":{"KND":"CLDT"}} -->실제 메시지
+      const cleanMsg = chatMsg.replace(/<!--[\s\S]*?-->/g, '').trim();
+
       // Bot에게 메시지 전달
       const taskRequest: BotTaskRequest = {
         chatroomId: String(chatroomId),
         senderId: String(sender),
         senderName: senderName || '',
         senderKnoxId: senderKnoxId || '',
-        message: chatMsg,
+        message: cleanMsg || chatMsg, // 클린 실패 시 원본 사용
         messageId: String(msgId),
         chatType: chatType || 'SINGLE',
         msgType: msgType || 'TEXT',

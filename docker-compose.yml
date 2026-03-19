@@ -6,14 +6,24 @@
 x-timezone: &timezone
   TZ: Asia/Seoul
 
-x-proxy-env: &proxy-env
-  <<: *timezone
+# 빌드 시 프록시 (npm install 등 외부 레지스트리 접근용)
+x-build-proxy: &build-proxy
   HTTP_PROXY: "${HTTP_PROXY:-}"
   HTTPS_PROXY: "${HTTPS_PROXY:-}"
-  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,redis,api-blue,api-green,nginx}"
+  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net}"
   http_proxy: "${HTTP_PROXY:-}"
   https_proxy: "${HTTPS_PROXY:-}"
-  no_proxy: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,redis,api-blue,api-green,nginx}"
+  no_proxy: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net}"
+
+# 런타임 프록시 해제 (사내망 전용 — 봇 PC로의 HTTP 요청이 프록시 타면 안 됨)
+x-runtime-env: &runtime-env
+  <<: *timezone
+  HTTP_PROXY: ""
+  HTTPS_PROXY: ""
+  NO_PROXY: "*"
+  http_proxy: ""
+  https_proxy: ""
+  no_proxy: "*"
   NODE_TLS_REJECT_UNAUTHORIZED: "0"
 
 x-api-common: &api-common
@@ -21,10 +31,10 @@ x-api-common: &api-common
     context: ./packages/api
     dockerfile: Dockerfile
     args:
-      <<: *proxy-env
+      <<: *build-proxy
   restart: unless-stopped
   environment:
-    <<: *proxy-env
+    <<: *runtime-env
     NODE_ENV: production
     REDIS_URL: redis://redis:6379
     KNOX_API_BASE_URL: ${KNOX_API_BASE_URL:-}

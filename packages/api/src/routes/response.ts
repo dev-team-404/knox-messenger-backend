@@ -6,7 +6,7 @@
  */
 
 import { Router } from 'express';
-import { sendMessage } from '../services/knox-api.js';
+import { sendMessage, sendAdaptiveCard, updateAdaptiveCard } from '../services/knox-api.js';
 import { config } from '../config.js';
 import { wlog } from '../middleware/logger.js';
 
@@ -46,6 +46,48 @@ responseRouter.post('/', async (req, res) => {
     }
   } catch (err) {
     wlog.error('Response: Knox send failed', { chatroomId, error: String(err) });
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// ─── Adaptive Card 발신 (msgType 19) ───
+responseRouter.post('/card', async (req, res) => {
+  const { chatroomId, card } = req.body;
+  if (!chatroomId || !card) {
+    res.status(400).json({ error: 'chatroomId and card (JSON object) are required' });
+    return;
+  }
+  wlog.info('Bot Adaptive Card response', { chatroomId });
+  try {
+    const result = await sendAdaptiveCard(Number(chatroomId), card);
+    if (result) {
+      res.json({ success: true, msgId: result.msgId });
+    } else {
+      res.status(502).json({ success: false, error: 'Knox Adaptive Card send failed' });
+    }
+  } catch (err) {
+    wlog.error('Response: Adaptive Card send failed', { chatroomId, error: String(err) });
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// ─── Adaptive Card 업데이트 (msgType 20 — 기존 카드 교체) ───
+responseRouter.post('/update-card', async (req, res) => {
+  const { chatroomId, originalMsgId, card } = req.body;
+  if (!chatroomId || !originalMsgId || !card) {
+    res.status(400).json({ error: 'chatroomId, originalMsgId, and card are required' });
+    return;
+  }
+  wlog.info('Bot Adaptive Card update', { chatroomId, originalMsgId });
+  try {
+    const success = await updateAdaptiveCard(Number(chatroomId), Number(originalMsgId), card);
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(502).json({ success: false, error: 'Knox Adaptive Card update failed' });
+    }
+  } catch (err) {
+    wlog.error('Response: Adaptive Card update failed', { chatroomId, error: String(err) });
     res.status(500).json({ success: false, error: String(err) });
   }
 });
