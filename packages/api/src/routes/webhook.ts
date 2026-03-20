@@ -15,6 +15,7 @@ import { getBot } from '../services/bot-registry.js';
 import { sendMessage, sendAdaptiveCard } from '../services/knox-api.js';
 import { wlog } from '../middleware/logger.js';
 import { config } from '../config.js';
+import { stats, recordError, trackSession } from '../index.js';
 import type { KnoxWebhookPayload, BotTaskRequest } from '../types.js';
 
 export const webhookRouter = Router();
@@ -69,6 +70,9 @@ webhookRouter.post(
         res.sendStatus(200);
         return;
       }
+
+      stats.webhooksReceived++;
+      if (senderKnoxId) trackSession(senderKnoxId);
 
       wlog.info('Webhook received', {
         sender,
@@ -126,7 +130,11 @@ webhookRouter.post(
         isIntro: botNotiType === 'INTRO',
       };
 
-      forwardToBot(bot.endpoint, taskRequest).catch((err) => {
+      forwardToBot(bot.endpoint, taskRequest).then(() => {
+        stats.webhooksForwarded++;
+      }).catch((err) => {
+        stats.webhooksFailed++;
+        recordError('/message→bot', String(err));
         wlog.error('Webhook: failed to forward to bot', {
           endpoint: bot.endpoint,
           error: String(err),
@@ -135,6 +143,7 @@ webhookRouter.post(
 
       res.sendStatus(200);
     } catch (err) {
+      recordError('/message', String(err));
       wlog.error('Webhook: unhandled error', { error: String(err) });
       res.sendStatus(200);
     }

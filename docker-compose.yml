@@ -63,7 +63,15 @@ services:
     restart: unless-stopped
     environment:
       <<: *timezone
-    command: redis-server --appendonly yes
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --timeout 300
+      --tcp-backlog 1024
+      --hz 100
     volumes:
       - knox_msg_redis_data:/data
     ports:

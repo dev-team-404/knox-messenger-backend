@@ -9,6 +9,7 @@ import { Router } from 'express';
 import { sendMessage, sendAdaptiveCard, updateAdaptiveCard } from '../services/knox-api.js';
 import { config } from '../config.js';
 import { wlog } from '../middleware/logger.js';
+import { stats, recordError } from '../index.js';
 
 export const responseRouter = Router();
 
@@ -40,11 +41,16 @@ responseRouter.post('/', async (req, res) => {
   try {
     const success = await sendMessage(String(chatroomId), String(message));
     if (success) {
+      stats.messagesSent++;
       res.json({ success: true });
     } else {
+      stats.messagesFailed++;
+      recordError('/api/response', 'Knox API call failed');
       res.status(502).json({ success: false, error: 'Knox API call failed' });
     }
   } catch (err) {
+    stats.messagesFailed++;
+    recordError('/api/response', String(err));
     wlog.error('Response: Knox send failed', { chatroomId, error: String(err) });
     res.status(500).json({ success: false, error: String(err) });
   }
