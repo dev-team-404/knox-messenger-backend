@@ -170,6 +170,7 @@ export async function createChatroom(
   receivers: number[],
   chatType: number = 5,
   title?: string,
+  retried = false,
 ): Promise<{ chatroomId: number } | null> {
   const body: KnoxCreateChatroomBody = {
     requestId: Date.now(),
@@ -182,14 +183,24 @@ export async function createChatroom(
     const encrypted = encryptPayload(body);
     const res = await knoxFetch('/messenger/message/api/v2.0/message/createChatroomRequest', {
       method: 'POST',
-      body: encrypted, // Knox는 암호화된 문자열 자체를 body로 기대
+      body: encrypted,
     });
     const raw = await res.text();
-    const decrypted = decryptResponse<{ chatroomId: number; result: { code: number } }>(raw);
+    const decrypted = decryptResponse<{ chatroomId: number; result: { code: number; msg?: string } }>(raw);
     if (decrypted && decrypted.result?.code === 1000) {
       wlog.info('Knox chatroom created', { chatroomId: decrypted.chatroomId });
       return { chatroomId: decrypted.chatroomId };
     }
+
+    // 에러 4003 또는 복호화 실패(키 만료) → 키 갱신 후 1회 재시도
+    if (!retried && (!decrypted || decrypted.result?.code === 4003 || !res.ok)) {
+      wlog.warn('Knox createChatroom: refreshing encryption key and retrying', { status: res.status, response: decrypted });
+      const newKey = await refreshEncryptionKey();
+      if (newKey) {
+        return createChatroom(receivers, chatType, title, true);
+      }
+    }
+
     wlog.error('Knox createChatroom failed', { response: decrypted });
     return null;
   } catch (err) {
