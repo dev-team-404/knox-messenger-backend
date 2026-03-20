@@ -29,9 +29,10 @@ initiateRouter.post('/', async (req: Request, res: Response) => {
     return;
   }
 
-  // receiverId: 숫자 ID 또는 loginId(문자열) 둘 다 지원
-  let id = Number(receiverId);
-  if (!Number.isFinite(id) || id <= 0) {
+  // receiverId: 숫자 ID(문자열) 또는 loginId 둘 다 지원
+  // ⚠️ Knox user ID는 int64 → JavaScript Number로 변환하면 정밀도 손실 → 문자열 유지
+  let resolvedId: string = String(receiverId);
+  if (!/^\d+$/.test(resolvedId)) {
     // loginId(문자열)로 간주 → Knox API로 숫자 ID 검색
     wlog.info('Initiate: receiverId is loginId, searching Knox user ID', { loginId: receiverId });
     const knoxUserId = await searchUserByLoginId(String(receiverId));
@@ -39,21 +40,21 @@ initiateRouter.post('/', async (req: Request, res: Response) => {
       res.status(400).json({ error: `Knox user not found for loginId: ${receiverId}` });
       return;
     }
-    id = knoxUserId;
+    resolvedId = knoxUserId;
   }
 
-  wlog.info('Initiate conversation', { receiverId, resolvedId: id, msgLength: message.length });
+  wlog.info('Initiate conversation', { receiverId, resolvedId, msgLength: message.length });
 
   try {
     // 1. Create chatroom (BROADCAST SINGLE = 1:1 공지방, chatType 5)
-    const result = await createChatroom([id], 5);
+    const result = await createChatroom([resolvedId], 5);
     if (!result) {
       res.status(502).json({ success: false, error: 'Failed to create chatroom' });
       return;
     }
 
-    // 2. Send first message
-    const sent = await sendMessage(result.chatroomId, message);
+    // 2. Send first message (chatroomId도 문자열 → Number 변환 필요)
+    const sent = await sendMessage(Number(result.chatroomId), message);
     if (!sent) {
       res.status(502).json({ success: false, error: 'Chatroom created but message send failed', chatroomId: String(result.chatroomId) });
       return;

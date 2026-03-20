@@ -8,7 +8,7 @@
  */
 
 import { config } from '../config.js';
-import { encryptPayload, decryptPayload } from './knox-crypto.js';
+import { encrypt, encryptPayload, decryptPayload } from './knox-crypto.js';
 import { wlog } from '../middleware/logger.js';
 import type { KnoxChatRequestBody, KnoxCreateChatroomBody } from '../types.js';
 
@@ -136,7 +136,7 @@ export async function refreshEncryptionKey(): Promise<string | null> {
 
 // ─── Login ID → Knox 숫자 User ID 검색 ───
 
-export async function searchUserByLoginId(loginId: string): Promise<number | null> {
+export async function searchUserByLoginId(loginId: string): Promise<string | null> {
   try {
     const res = await knoxFetch('/messenger/contact/api/v2.0/profile/o1/search/loginid', {
       method: 'POST',
@@ -144,19 +144,16 @@ export async function searchUserByLoginId(loginId: string): Promise<number | nul
         singleIdList: [{ singleId: loginId }],
       }),
     });
-    const data = await res.json() as {
-      userSearchResult?: {
-        searchResultList?: Array<{ userID: number; singleID: string }>;
-      };
-    };
-    const found = data?.userSearchResult?.searchResultList?.find(
-      r => r.singleID === loginId || r.singleID?.toLowerCase() === loginId.toLowerCase()
-    );
-    if (found?.userID) {
-      wlog.info('Knox user ID found', { loginId, userID: found.userID });
-      return found.userID;
+    // ⚠️ JSON.parse()로 파싱하면 int64 ID가 정밀도를 잃음 (845030079967268900 → 845030079967268864)
+    // raw text에서 regex로 정확한 숫자 문자열을 추출
+    const raw = await res.text();
+    const match = raw.match(new RegExp(`"userID"\\s*:\\s*(\\d+)[^"]*"singleID"\\s*:\\s*"${loginId.replace('.', '\\.')}"`, 'i'))
+      || raw.match(/"userID"\s*:\s*(\d+)/);
+    if (match?.[1]) {
+      wlog.info('Knox user ID found', { loginId, userID: match[1] });
+      return match[1]; // 문자열로 반환 (정밀도 보존)
     }
-    wlog.warn('Knox user ID not found for loginId', { loginId, response: data });
+    wlog.warn('Knox user ID not found for loginId', { loginId, raw: raw.slice(0, 500) });
     return null;
   } catch (err) {
     wlog.error('Knox searchUserByLoginId failed', { loginId, error: String(err) });
@@ -167,20 +164,20 @@ export async function searchUserByLoginId(loginId: string): Promise<number | nul
 // ─── 대화방 생성 ───
 
 export async function createChatroom(
-  receivers: number[],
+  receivers: (number | string)[],
   chatType: number = 5,
   title?: string,
   retried = false,
-): Promise<{ chatroomId: number } | null> {
-  const body: KnoxCreateChatroomBody = {
-    requestId: Date.now(),
-    chatType,
-    receivers,
-    ...(title && { chatroomTitle: title }),
-  };
+): Promise<{ chatroomId: string } | null> {
+  // ⚠️ Knox user ID는 int64 → JavaScript Number로 표현하면 정밀도 손실
+  // JSON을 직접 조립해서 문자열 ID를 숫자 그대로 보존
+  const requestId = Date.now();
+  const receiversJson = receivers.map(r => String(r)).join(',');
+  const titlePart = title ? `,"chatroomTitle":"${title}"` : '';
+  const plainJson = `{"requestId":${requestId},"chatType":${chatType},"receivers":[${receiversJson}]${titlePart}}`;
 
   try {
-    const encrypted = encryptPayload(body);
+    const encrypted = encrypt(plainJson);
     const res = await knoxFetch('/messenger/message/api/v2.0/message/createChatroomRequest', {
       method: 'POST',
       body: encrypted,
@@ -204,10 +201,14 @@ export async function createChatroom(
       return null;
     }
 
+    // chatroomId도 int64 → 정밀도 보존을 위해 raw에서 regex 추출
     const decrypted = decryptResponse<{ chatroomId: number; result: { code: number; msg?: string } }>(raw);
     if (decrypted && decrypted.result?.code === 1000) {
-      wlog.info('Knox chatroom created', { chatroomId: decrypted.chatroomId });
-      return { chatroomId: decrypted.chatroomId };
+      // decryptResponse 내부의 decrypt() 결과에서 chatroomId를 문자열로 추출
+      const decryptedJson = (() => { try { const { decrypt } = require('./knox-crypto.js'); const plain = decrypt(raw.replace(/^"|"$/g, '')); const m = plain.match(/"chatroomId"\s*:\s*(\d+)/); return m?.[1]; } catch { return null; } })();
+      const chatroomId = decryptedJson || String(decrypted.chatroomId);
+      wlog.info('Knox chatroom created', { chatroomId });
+      return { chatroomId };
     }
 
     wlog.error('Knox createChatroom failed', { response: decrypted });
