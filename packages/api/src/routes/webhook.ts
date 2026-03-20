@@ -12,6 +12,7 @@
 import { Router, text as expressText } from 'express';
 import { decryptPayload } from '../services/knox-crypto.js';
 import { getBot } from '../services/bot-registry.js';
+import { sendMessage, sendAdaptiveCard } from '../services/knox-api.js';
 import { wlog } from '../middleware/logger.js';
 import { config } from '../config.js';
 import type { KnoxWebhookPayload, BotTaskRequest } from '../types.js';
@@ -93,8 +94,24 @@ webhookRouter.post(
       }
 
       // Knox chatMsg에서 HTML 메타데이터 주석 제거
-      // 예: <!-- {"COMMAND":"SNDCL", "SNDCL":{"KND":"CLDT"}} -->실제 메시지
       const cleanMsg = chatMsg.replace(/<!--[\s\S]*?-->/g, '').trim();
+
+      // 즉시 "생각 중..." Adaptive Card 전송 (Electron 응답 기다리지 않음)
+      if (!botNotiType || botNotiType !== 'INTRO') {
+        sendAdaptiveCard(String(chatroomId), {
+          '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json',
+          type: 'AdaptiveCard',
+          version: '1.0',
+          body: [
+            { type: 'TextBlock', text: '🤔 생각 중...', weight: 'bolder', size: 'medium' },
+            { type: 'TextBlock', text: cleanMsg.slice(0, 100), wrap: true, isSubtle: true, size: 'small' },
+          ],
+        }).catch((err) => {
+          // Adaptive Card 실패 시 plain text fallback
+          wlog.warn('Webhook: thinking card failed, trying text', { error: String(err) });
+          sendMessage(String(chatroomId), '🤔 생각 중...').catch(() => {});
+        });
+      }
 
       // Bot에게 메시지 전달
       const taskRequest: BotTaskRequest = {
