@@ -100,6 +100,7 @@ services:
       <<: *timezone
     ports:
       - "${PROXY_PORT:-6000}:6000"
+      - "6080:6080"
     volumes:
       - ./nginx/active-upstream.conf:/etc/nginx/conf.d/upstream.conf:ro
     depends_on:
