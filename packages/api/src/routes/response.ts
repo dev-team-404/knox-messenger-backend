@@ -38,7 +38,7 @@ responseRouter.post('/', async (req, res) => {
   });
 
   try {
-    const success = await sendMessage(Number(chatroomId), String(message));
+    const success = await sendMessage(String(chatroomId), String(message));
     if (success) {
       res.json({ success: true });
     } else {
@@ -59,7 +59,7 @@ responseRouter.post('/card', async (req, res) => {
   }
   wlog.info('Bot Adaptive Card response', { chatroomId });
   try {
-    const result = await sendAdaptiveCard(Number(chatroomId), card);
+    const result = await sendAdaptiveCard(String(chatroomId), card);
     if (result) {
       res.json({ success: true, msgId: result.msgId });
     } else {
@@ -80,7 +80,7 @@ responseRouter.post('/update-card', async (req, res) => {
   }
   wlog.info('Bot Adaptive Card update', { chatroomId, originalMsgId });
   try {
-    const success = await updateAdaptiveCard(Number(chatroomId), Number(originalMsgId), card);
+    const success = await updateAdaptiveCard(String(chatroomId), String(originalMsgId), card);
     if (success) {
       res.json({ success: true });
     } else {

@@ -221,7 +221,7 @@ export async function createChatroom(
 
 // ─── 메시지 발신 ───
 
-export async function sendMessage(chatroomId: number, message: string): Promise<boolean> {
+export async function sendMessage(chatroomId: number | string, message: string): Promise<boolean> {
   // 3300자 초과 시 분할 발신
   if (message.length > 3300) {
     return sendLongMessage(chatroomId, message);
@@ -229,23 +229,14 @@ export async function sendMessage(chatroomId: number, message: string): Promise<
   return sendSingleMessage(chatroomId, message);
 }
 
-async function sendSingleMessage(chatroomId: number, message: string, retried = false): Promise<boolean> {
+async function sendSingleMessage(chatroomId: number | string, message: string, retried = false): Promise<boolean> {
   const msgId = Date.now();
-  const body: KnoxChatRequestBody = {
-    requestId: msgId,
-    chatroomId,
-    chatMessageParams: [
-      {
-        msgId,
-        msgType: 0,
-        chatMsg: message,
-        msgTtl: 259200,
-      },
-    ],
-  };
+  // ⚠️ chatroomId는 int64 → JSON 직접 조립으로 정밀도 보존
+  const escapedMsg = JSON.stringify(message); // 문자열 이스케이프만 활용
+  const plainJson = `{"requestId":${msgId},"chatroomId":${chatroomId},"chatMessageParams":[{"msgId":${msgId},"msgType":0,"chatMsg":${escapedMsg},"msgTtl":259200}]}`;
 
   try {
-    const encrypted = encryptPayload(body);
+    const encrypted = encrypt(plainJson);
     const res = await knoxFetch('/messenger/message/api/v2.0/message/chatRequest', {
       method: 'POST',
       body: encrypted, // Knox는 암호화된 문자열 자체를 body로 기대
@@ -278,25 +269,17 @@ async function sendSingleMessage(chatroomId: number, message: string, retried = 
 // ─── Adaptive Card 발신 (msgType 19) ───
 
 export async function sendAdaptiveCard(
-  chatroomId: number,
+  chatroomId: number | string,
   card: Record<string, unknown>,
   retried = false,
 ): Promise<{ msgId: number } | null> {
   const msgId = Date.now();
   const cardJson = typeof card === 'string' ? card : JSON.stringify(card);
-  const body: KnoxChatRequestBody = {
-    requestId: msgId,
-    chatroomId,
-    chatMessageParams: [{
-      msgId,
-      msgType: 19, // ADAPTIVE_CARD
-      chatMsg: cardJson,
-      msgTtl: 259200,
-    }],
-  };
+  const escapedCard = JSON.stringify(cardJson); // 이중 이스케이프
+  const plainJson = `{"requestId":${msgId},"chatroomId":${chatroomId},"chatMessageParams":[{"msgId":${msgId},"msgType":19,"chatMsg":${escapedCard},"msgTtl":259200}]}`;
 
   try {
-    const encrypted = encryptPayload(body);
+    const encrypted = encrypt(plainJson);
     const res = await knoxFetch('/messenger/message/api/v2.0/message/chatRequest', {
       method: 'POST',
       body: encrypted,
@@ -326,26 +309,18 @@ export async function sendAdaptiveCard(
 // ─── Adaptive Card 업데이트 (msgType 20 — 기존 카드 교체) ───
 
 export async function updateAdaptiveCard(
-  chatroomId: number,
-  originalMsgId: number,
+  chatroomId: number | string,
+  originalMsgId: number | string,
   card: Record<string, unknown>,
   retried = false,
 ): Promise<boolean> {
   const msgId = Date.now();
   const cardJson = typeof card === 'string' ? card : JSON.stringify(card);
-  const body: KnoxChatRequestBody = {
-    requestId: msgId,
-    chatroomId,
-    chatMessageParams: [{
-      msgId: originalMsgId, // 원본 메시지 ID → 이 카드를 교체
-      msgType: 20, // UPDATED_ADAPTIVE_CARD
-      chatMsg: cardJson,
-      msgTtl: 259200,
-    }],
-  };
+  const escapedCard = JSON.stringify(cardJson);
+  const plainJson = `{"requestId":${msgId},"chatroomId":${chatroomId},"chatMessageParams":[{"msgId":${originalMsgId},"msgType":20,"chatMsg":${escapedCard},"msgTtl":259200}]}`;
 
   try {
-    const encrypted = encryptPayload(body);
+    const encrypted = encrypt(plainJson);
     const res = await knoxFetch('/messenger/message/api/v2.0/message/chatRequest', {
       method: 'POST',
       body: encrypted,
@@ -373,7 +348,7 @@ export async function updateAdaptiveCard(
 }
 
 // 3300자 초과 메시지 분할 발신
-async function sendLongMessage(chatroomId: number, message: string): Promise<boolean> {
+async function sendLongMessage(chatroomId: number | string, message: string): Promise<boolean> {
   const chunks: string[] = [];
   for (let i = 0; i < message.length; i += 3200) {
     chunks.push(message.slice(i, i + 3200));

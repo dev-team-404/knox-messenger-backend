@@ -53,8 +53,8 @@ initiateRouter.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    // 2. Send first message (chatroomId도 문자열 → Number 변환 필요)
-    const sent = await sendMessage(Number(result.chatroomId), message);
+    // 2. Send first message (chatroomId는 string 유지 — int64 정밀도 보존)
+    const sent = await sendMessage(result.chatroomId, message);
     if (!sent) {
       res.status(502).json({ success: false, error: 'Chatroom created but message send failed', chatroomId: String(result.chatroomId) });
       return;
