@@ -9,7 +9,7 @@ import { Router } from 'express';
 import { sendMessage, sendAdaptiveCard, updateAdaptiveCard } from '../services/knox-api.js';
 import { config } from '../config.js';
 import { wlog } from '../middleware/logger.js';
-import { stats, recordError } from '../index.js';
+import { stats, recordError } from '../services/stats.js';
 
 export const responseRouter = Router();
 

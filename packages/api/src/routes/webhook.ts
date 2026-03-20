@@ -15,7 +15,7 @@ import { getBot } from '../services/bot-registry.js';
 import { sendMessage, sendAdaptiveCard } from '../services/knox-api.js';
 import { wlog } from '../middleware/logger.js';
 import { config } from '../config.js';
-import { stats, recordError, trackSession } from '../index.js';
+import { stats, recordError, trackSession } from '../services/stats.js';
 import type { KnoxWebhookPayload, BotTaskRequest } from '../types.js';
 
 export const webhookRouter = Router();
