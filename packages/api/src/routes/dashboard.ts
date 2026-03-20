@@ -504,7 +504,7 @@ function getDashboardHTML(tkn: string): string {
 </div>
 
 <script>
-const TOKEN = '${token}';
+const TOKEN = ${JSON.stringify(token)};
 const API = '/dashboard/api';
 let cachedData = null;
 
