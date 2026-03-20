@@ -223,7 +223,6 @@ export async function createChatroom(
       wlog.error('Knox createChatroom: failed to decrypt response');
     }
 
-    wlog.error('Knox createChatroom failed', { response: decrypted });
     return null;
   } catch (err) {
     wlog.error('Knox createChatroom error', { error: String(err) });
@@ -302,17 +301,23 @@ export async function sendAdaptiveCard(
       body: encrypted,
     });
     const raw = await res.text();
-    const decrypted = decryptResponse<{ result: { code: number } }>(raw);
 
+    if (!res.ok) {
+      let errorInfo: unknown = null;
+      try { errorInfo = JSON.parse(raw); } catch { errorInfo = raw.slice(0, 300); }
+      wlog.error('Knox sendAdaptiveCard error response', { status: res.status, chatroomId, error: errorInfo });
+      const errorCode = (errorInfo as any)?.code;
+      if (!retried && (errorCode === 4003 || errorCode === 2001)) {
+        const newKey = await refreshEncryptionKey();
+        if (newKey) return sendAdaptiveCard(chatroomId, card, true);
+      }
+      return null;
+    }
+
+    const decrypted = decryptResponse<{ result: { code: number } }>(raw);
     if (decrypted && decrypted.result?.code === 1000) {
       wlog.info('Knox Adaptive Card sent', { chatroomId, msgId });
       return { msgId };
-    }
-
-    if (!retried && decrypted && decrypted.result?.code === 4003) {
-      wlog.warn('Knox Adaptive Card error 4003: refreshing key');
-      const newKey = await refreshEncryptionKey();
-      if (newKey) return sendAdaptiveCard(chatroomId, card, true);
     }
 
     wlog.error('Knox sendAdaptiveCard failed', { chatroomId, response: decrypted });
@@ -343,17 +348,23 @@ export async function updateAdaptiveCard(
       body: encrypted,
     });
     const raw = await res.text();
-    const decrypted = decryptResponse<{ result: { code: number } }>(raw);
 
+    if (!res.ok) {
+      let errorInfo: unknown = null;
+      try { errorInfo = JSON.parse(raw); } catch { errorInfo = raw.slice(0, 300); }
+      wlog.error('Knox updateAdaptiveCard error response', { status: res.status, chatroomId, error: errorInfo });
+      const errorCode = (errorInfo as any)?.code;
+      if (!retried && (errorCode === 4003 || errorCode === 2001)) {
+        const newKey = await refreshEncryptionKey();
+        if (newKey) return updateAdaptiveCard(chatroomId, originalMsgId, card, true);
+      }
+      return false;
+    }
+
+    const decrypted = decryptResponse<{ result: { code: number } }>(raw);
     if (decrypted && decrypted.result?.code === 1000) {
       wlog.info('Knox Adaptive Card updated', { chatroomId, originalMsgId });
       return true;
-    }
-
-    if (!retried && decrypted && decrypted.result?.code === 4003) {
-      wlog.warn('Knox updateAdaptiveCard error 4003: refreshing key');
-      const newKey = await refreshEncryptionKey();
-      if (newKey) return updateAdaptiveCard(chatroomId, originalMsgId, card, true);
     }
 
     wlog.error('Knox updateAdaptiveCard failed', { chatroomId, response: decrypted });

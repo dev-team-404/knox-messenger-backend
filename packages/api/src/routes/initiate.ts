@@ -46,8 +46,8 @@ initiateRouter.post('/', async (req: Request, res: Response) => {
   wlog.info('Initiate conversation', { receiverId, resolvedId, msgLength: message.length });
 
   try {
-    // 1. Create chatroom (BROADCAST SINGLE = 1:1 공지방, chatType 5)
-    const result = await createChatroom([resolvedId], 5);
+    // 1. Create chatroom (SINGLE = 1:1 대화, chatType 0 — 사용자도 답장 가능)
+    const result = await createChatroom([resolvedId], 0);
     if (!result) {
       res.status(502).json({ success: false, error: 'Failed to create chatroom' });
       return;
