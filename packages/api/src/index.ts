@@ -33,8 +33,41 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
+// ─── SSO 인증 콜백 ───
+const dashboardSessions = new Map<string, { loginId: string; expiresAt: number }>(); // token → session
+
+app.get('/dashboard/sso-callback', (req, res) => {
+  const data = req.query.data as string;
+  if (!data) { res.status(400).send('SSO data missing'); return; }
+  try {
+    const payload = JSON.parse(data);
+    const loginId = payload.loginid;
+    if (loginId !== config.sso.adminLoginId) {
+      res.status(403).send(`<h1>접근 거부</h1><p>${loginId}은(는) 관리자가 아닙니다.</p>`);
+      return;
+    }
+    // 세션 토큰 발급 (24시간)
+    const token = `dash_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    dashboardSessions.set(token, { loginId, expiresAt: Date.now() + 24 * 60 * 60 * 1000 });
+    res.redirect(`/dashboard?token=${token}`);
+  } catch {
+    res.status(400).send('SSO data parse failed');
+  }
+});
+
 // ─── Admin Dashboard (SSO: syngha.han만 접근 가능) ───
-app.get('/dashboard', async (_req, res) => {
+app.get('/dashboard', async (req, res) => {
+  // SSO 인증 체크
+  const token = req.query.token as string;
+  const session = token ? dashboardSessions.get(token) : null;
+  if (!session || session.expiresAt < Date.now()) {
+    if (token) dashboardSessions.delete(token); // 만료된 세션 제거
+    const callbackUrl = `http://${req.headers.host}/dashboard/sso-callback`;
+    const ssoUrl = `${config.sso.baseUrl}${config.sso.ssoPath}?redirect_url=${encodeURIComponent(callbackUrl)}`;
+    res.redirect(ssoUrl);
+    return;
+  }
+
   try {
     const bots = await listBots();
     const redis = getRedis();
@@ -83,7 +116,7 @@ app.get('/dashboard', async (_req, res) => {
   </style>
 </head>
 <body>
-  <h1>Jarvis Message Server <a href="/dashboard" class="refresh">새로고침</a></h1>
+  <h1>Jarvis Message Server <a href="/dashboard?token=${token}" class="refresh">새로고침</a></h1>
 
   <h2>서버 상태</h2>
   <div class="grid">
@@ -135,7 +168,7 @@ app.get('/dashboard', async (_req, res) => {
     ).join('') || '<div style="color:#8b949e">에러 없음</div>'}
   </div>
 
-  <script>setTimeout(() => location.reload(), 30000);</script>
+  <script>setTimeout(() => location.href='/dashboard?token=${token}', 30000);</script>
 </body>
 </html>`;
 

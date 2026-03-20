@@ -14,4 +14,9 @@ export const config = {
     encryptionKey: process.env.KNOX_ENCRYPTION_KEY || '',
   },
   botApiKey: process.env.BOT_API_KEY || '',
+  sso: {
+    baseUrl: process.env.SSO_BASE_URL || 'https://genai.samsungds.net:36810',
+    ssoPath: '/direct_sso',
+    adminLoginId: process.env.DASHBOARD_ADMIN || 'syngha.han',
+  },
 };
