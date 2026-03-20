@@ -62,7 +62,10 @@ app.get('/dashboard', async (req, res) => {
   const session = token ? dashboardSessions.get(token) : null;
   if (!session || session.expiresAt < Date.now()) {
     if (token) dashboardSessions.delete(token); // 만료된 세션 제거
-    const callbackUrl = `http://${req.headers.host}/dashboard/sso-callback`;
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
+    const port = req.headers['x-forwarded-port'] || '';
+    const hostWithPort = String(host).includes(':') ? host : (port ? `${host}:${port}` : `${host}:6080`);
+    const callbackUrl = `http://${hostWithPort}/dashboard/sso-callback`;
     const ssoUrl = `${config.sso.baseUrl}${config.sso.ssoPath}?redirect_url=${encodeURIComponent(callbackUrl)}`;
     res.redirect(ssoUrl);
     return;
