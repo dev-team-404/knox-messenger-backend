@@ -152,7 +152,9 @@ dashboardRouter.get('/', async (req: Request, res: Response) => {
   res.type('html').send(getDashboardHTML(token));
 });
 
-function getDashboardHTML(token: string): string {
+function getDashboardHTML(tkn: string): string {
+  // token을 JS에서 안전하게 사용하기 위해 변수명 변경
+  const token = tkn;
   return `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -390,6 +392,27 @@ function getDashboardHTML(token: string): string {
   .send-result.success { background: var(--glow-green); color: var(--accent-green); }
   .send-result.error { background: var(--glow-red); color: var(--accent-red); }
 
+  /* ─── Tabs ─── */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tab {
+    padding: 10px 20px; font-size: 13px; font-weight: 500; color: var(--text-secondary);
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s;
+    background: none; border-top: none; border-left: none; border-right: none;
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; animation: fade-in 0.2s ease-out; }
+
+  /* ─── Search ─── */
+  .search-bar {
+    padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border);
+    background: var(--bg-input); color: var(--text-primary); font-size: 12px;
+    width: 220px; outline: none; transition: border-color 0.15s;
+  }
+  .search-bar:focus { border-color: var(--accent-blue); }
+  .search-bar::placeholder { color: var(--text-tertiary); }
+
   /* ─── Empty State ─── */
   .empty { padding: 32px; text-align: center; color: var(--text-tertiary); font-size: 12px; }
 
@@ -415,45 +438,75 @@ function getDashboardHTML(token: string): string {
 <div class="main">
   <div class="stats-grid" id="stats-grid"></div>
 
-  <div class="send-section animate-in">
-    <div class="section-title" style="margin-bottom:4px">
-      <span>📨</span> 임직원에게 메시지 전송 (Jarvis 계정)
-    </div>
-    <div style="font-size:11px;color:var(--text-secondary)">Knox Portal ID로 검색하여 메시지를 전송합니다</div>
-    <div class="send-form">
-      <input class="send-input" id="targetId" placeholder="Knox ID (예: syngha.han)" style="max-width:200px" />
-      <input class="send-input" id="msgContent" placeholder="메시지 내용" />
-      <button class="send-btn" id="sendBtn" onclick="sendMessage()">전송</button>
-    </div>
-    <div id="sendResult" style="display:none"></div>
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('bots')">🤖 봇</button>
+    <button class="tab" onclick="switchTab('sessions')">👥 세션</button>
+    <button class="tab" onclick="switchTab('send')">📨 메시지 전송</button>
+    <button class="tab" onclick="switchTab('errors')">⚠️ 에러</button>
   </div>
 
-  <div class="sections-grid">
-    <div class="section animate-in">
+  <!-- 봇 탭 -->
+  <div id="tab-bots" class="tab-content active">
+    <div class="section">
       <div class="section-header">
-        <div class="section-title"><span>🤖</span> 등록된 봇 <span class="section-count" id="bot-count">0</span></div>
+        <div class="section-title">등록된 봇 <span class="section-count" id="bot-count">0</span></div>
+        <input class="search-bar" id="bot-search" placeholder="ID 검색..." oninput="filterList('bots')" />
       </div>
       <div class="section-body" id="bots-list"><div class="empty">로딩 중...</div></div>
     </div>
-    <div class="section animate-in">
+  </div>
+
+  <!-- 세션 탭 -->
+  <div id="tab-sessions" class="tab-content">
+    <div class="section">
       <div class="section-header">
-        <div class="section-title"><span>👥</span> 활성 세션 (24h) <span class="section-count" id="session-count">0</span></div>
+        <div class="section-title">활성 세션 (24h) <span class="section-count" id="session-count">0</span></div>
+        <input class="search-bar" id="session-search" placeholder="ID 검색..." oninput="filterList('sessions')" />
       </div>
       <div class="section-body" id="sessions-list"><div class="empty">로딩 중...</div></div>
     </div>
   </div>
 
-  <div class="section animate-in">
-    <div class="section-header">
-      <div class="section-title"><span>⚠️</span> 최근 에러 <span class="section-count" id="error-count">0</span></div>
+  <!-- 메시지 전송 탭 -->
+  <div id="tab-send" class="tab-content">
+    <div class="section" style="border:none">
+      <div style="padding:20px">
+        <div class="section-title" style="margin-bottom:12px">📨 임직원에게 메시지 전송 (Jarvis 계정)</div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:16px">등록된 봇 사용자 또는 Knox ID로 메시지를 전송합니다</div>
+        <div style="margin-bottom:12px">
+          <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">받는 사람</label>
+          <div style="display:flex;gap:8px">
+            <select id="targetSelect" class="send-input" style="max-width:250px" onchange="document.getElementById('targetId').value=this.value">
+              <option value="">-- 등록된 사용자 선택 --</option>
+            </select>
+            <input class="send-input" id="targetId" placeholder="또는 Knox ID 직접 입력" style="max-width:200px" />
+          </div>
+        </div>
+        <div style="margin-bottom:12px">
+          <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">메시지</label>
+          <textarea class="send-input" id="msgContent" placeholder="메시지 내용" rows="3" style="resize:vertical;width:100%"></textarea>
+        </div>
+        <button class="send-btn" id="sendBtn" onclick="doSend()">전송</button>
+        <div id="sendResult" style="display:none"></div>
+      </div>
     </div>
-    <div class="section-body" id="errors-list"><div class="empty">에러 없음</div></div>
+  </div>
+
+  <!-- 에러 탭 -->
+  <div id="tab-errors" class="tab-content">
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">최근 에러 <span class="section-count" id="error-count">0</span></div>
+      </div>
+      <div class="section-body" id="errors-list"><div class="empty">에러 없음</div></div>
+    </div>
   </div>
 </div>
 
 <script>
 const TOKEN = '${token}';
 const API = '/dashboard/api';
+let cachedData = null;
 
 function fmt(n) { return n.toLocaleString(); }
 function timeAgo(iso) {
@@ -466,6 +519,22 @@ function timeAgo(iso) {
 function uptimeStr(s) {
   const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
   return h > 0 ? h+'h '+m+'m' : m+'m';
+}
+
+// 탭 전환
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+// 검색 필터
+function filterList(type) {
+  const query = document.getElementById(type === 'bots' ? 'bot-search' : 'session-search').value.toLowerCase();
+  if (!cachedData) return;
+  if (type === 'bots') renderBots(cachedData.bots.filter(b => b.knoxUserId.toLowerCase().includes(query)));
+  else renderSessions(cachedData.sessions.filter(s => s.loginId.toLowerCase().includes(query)));
 }
 
 function renderStats(d) {
@@ -484,6 +553,8 @@ function renderStats(d) {
 }
 
 function renderBots(bots) {
+  // ID 기준 알파벳 정렬
+  bots = [...bots].sort((a,b) => a.knoxUserId.localeCompare(b.knoxUserId));
   document.getElementById('bot-count').textContent = bots.length;
   if (!bots.length) { document.getElementById('bots-list').innerHTML = '<div class="empty">등록된 봇 없음</div>'; return; }
   document.getElementById('bots-list').innerHTML = bots.map(b =>
@@ -498,6 +569,7 @@ function renderBots(bots) {
 }
 
 function renderSessions(sessions) {
+  sessions = [...sessions].sort((a,b) => a.loginId.localeCompare(b.loginId));
   document.getElementById('session-count').textContent = sessions.length;
   if (!sessions.length) { document.getElementById('sessions-list').innerHTML = '<div class="empty">활성 세션 없음</div>'; return; }
   document.getElementById('sessions-list').innerHTML = sessions.map(s =>
@@ -516,23 +588,45 @@ function renderErrors(errors) {
   ).join('');
 }
 
+// 메시지 전송 드롭다운 업데이트
+function updateTargetDropdown(bots, sessions) {
+  const sel = document.getElementById('targetSelect');
+  const ids = new Set();
+  // 봇 + 세션에서 유니크 ID 수집
+  bots.forEach(b => ids.add(b.knoxUserId));
+  sessions.forEach(s => ids.add(s.loginId));
+  const sorted = [...ids].sort((a,b) => a.localeCompare(b));
+  const current = sel.value;
+  sel.innerHTML = '<option value="">-- 등록된 사용자 선택 --</option>' +
+    sorted.map(id => {
+      const bot = bots.find(b => b.knoxUserId === id);
+      const online = bot?.online ? ' (Online)' : '';
+      return '<option value="'+id+'"'+(id===current?' selected':'')+'>'+id+online+'</option>';
+    }).join('');
+}
+
 async function refresh() {
   try {
     const res = await fetch(API+'/stats?token='+TOKEN);
     if (res.status === 401) { location.href = '/dashboard'; return; }
     const d = await res.json();
+    cachedData = d;
     renderStats(d);
-    renderBots(d.bots);
-    renderSessions(d.sessions);
+    // 검색 필터가 활성화되어 있으면 필터 적용
+    const botQ = document.getElementById('bot-search')?.value?.toLowerCase() || '';
+    const sesQ = document.getElementById('session-search')?.value?.toLowerCase() || '';
+    renderBots(botQ ? d.bots.filter(b => b.knoxUserId.toLowerCase().includes(botQ)) : d.bots);
+    renderSessions(sesQ ? d.sessions.filter(s => s.loginId.toLowerCase().includes(sesQ)) : d.sessions);
     renderErrors(d.errors);
+    updateTargetDropdown(d.bots, d.sessions);
   } catch(e) { console.error('Refresh failed:', e); }
 }
 
-async function sendMessage() {
-  const target = document.getElementById('targetId').value.trim();
+async function doSend() {
+  const target = document.getElementById('targetId').value.trim() || document.getElementById('targetSelect').value;
   const msg = document.getElementById('msgContent').value.trim();
   const resultEl = document.getElementById('sendResult');
-  if (!target || !msg) { resultEl.className='send-result error'; resultEl.textContent='ID와 메시지를 입력하세요'; resultEl.style.display='block'; return; }
+  if (!target || !msg) { resultEl.className='send-result error'; resultEl.textContent='받는 사람과 메시지를 입력하세요'; resultEl.style.display='block'; return; }
 
   document.getElementById('sendBtn').disabled = true;
   document.getElementById('sendBtn').textContent = '전송 중...';
@@ -546,7 +640,7 @@ async function sendMessage() {
     const d = await res.json();
     if (d.success) {
       resultEl.className='send-result success';
-      resultEl.textContent='전송 완료 (chatroom: '+d.chatroomId+')';
+      resultEl.textContent='전송 완료 → '+target;
       document.getElementById('msgContent').value = '';
     } else {
       resultEl.className='send-result error';
@@ -562,7 +656,6 @@ async function sendMessage() {
   setTimeout(() => { resultEl.style.display='none'; }, 5000);
 }
 
-// 초기 로드 + 5초 자동 갱신
 refresh();
 setInterval(refresh, 5000);
 </script>
