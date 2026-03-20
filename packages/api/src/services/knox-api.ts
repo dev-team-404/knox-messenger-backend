@@ -8,7 +8,7 @@
  */
 
 import { config } from '../config.js';
-import { encrypt, encryptPayload, decryptPayload } from './knox-crypto.js';
+import { encrypt, decrypt, encryptPayload, decryptPayload } from './knox-crypto.js';
 import { wlog } from '../middleware/logger.js';
 import type { KnoxChatRequestBody, KnoxCreateChatroomBody } from '../types.js';
 
@@ -201,14 +201,26 @@ export async function createChatroom(
       return null;
     }
 
-    // chatroomId도 int64 → 정밀도 보존을 위해 raw에서 regex 추출
-    const decrypted = decryptResponse<{ chatroomId: number; result: { code: number; msg?: string } }>(raw);
-    if (decrypted && decrypted.result?.code === 1000) {
-      // decryptResponse 내부의 decrypt() 결과에서 chatroomId를 문자열로 추출
-      const decryptedJson = (() => { try { const { decrypt } = require('./knox-crypto.js'); const plain = decrypt(raw.replace(/^"|"$/g, '')); const m = plain.match(/"chatroomId"\s*:\s*(\d+)/); return m?.[1]; } catch { return null; } })();
-      const chatroomId = decryptedJson || String(decrypted.chatroomId);
-      wlog.info('Knox chatroom created', { chatroomId });
-      return { chatroomId };
+    // chatroomId는 int64 → JSON.parse로 파싱하면 정밀도 손실
+    // 복호화된 plain text에서 regex로 정확한 숫자 문자열 추출
+    let stripped = raw.trim();
+    if (stripped.startsWith('"') && stripped.endsWith('"')) {
+      try { stripped = JSON.parse(stripped) as string; } catch { /* 그대로 */ }
+    }
+    const plainText = (() => { try { return decrypt(stripped); } catch { return null; } })();
+    if (plainText) {
+      wlog.info('Knox createChatroom decrypted', { plainText: plainText.slice(0, 300) });
+      const codeMatch = plainText.match(/"code"\s*:\s*(\d+)/);
+      const code = codeMatch ? Number(codeMatch[1]) : 0;
+      if (code === 1000) {
+        const chatroomMatch = plainText.match(/"chatroomId"\s*:\s*(\d+)/);
+        const chatroomId = chatroomMatch?.[1] || '0';
+        wlog.info('Knox chatroom created', { chatroomId });
+        return { chatroomId };
+      }
+      wlog.error('Knox createChatroom failed', { code, plainText: plainText.slice(0, 300) });
+    } else {
+      wlog.error('Knox createChatroom: failed to decrypt response');
     }
 
     wlog.error('Knox createChatroom failed', { response: decrypted });
@@ -242,20 +254,25 @@ async function sendSingleMessage(chatroomId: number | string, message: string, r
       body: encrypted, // Knox는 암호화된 문자열 자체를 body로 기대
     });
     const raw = await res.text();
-    const decrypted = decryptResponse<{ result: { code: number; msg?: string } }>(raw);
 
+    // 에러 응답은 암호화 안 됨 → plain JSON으로 먼저 시도
+    if (!res.ok) {
+      let errorInfo: unknown = null;
+      try { errorInfo = JSON.parse(raw); } catch { errorInfo = raw.slice(0, 300); }
+      wlog.error('Knox sendMessage error response', { status: res.status, chatroomId, error: errorInfo });
+      const errorCode = (errorInfo as any)?.code || (errorInfo as any)?.result?.code;
+      if (!retried && (errorCode === 4003 || errorCode === 2001)) {
+        wlog.warn('Knox sendMessage: refreshing encryption key and retrying');
+        const newKey = await refreshEncryptionKey();
+        if (newKey) return sendSingleMessage(chatroomId, message, true);
+      }
+      return false;
+    }
+
+    const decrypted = decryptResponse<{ result: { code: number; msg?: string } }>(raw);
     if (decrypted && decrypted.result?.code === 1000) {
       wlog.info('Knox message sent', { chatroomId, msgLength: message.length });
       return true;
-    }
-
-    // 에러 4003: 암호화 키 만료 → 키 갱신 후 1회만 재시도
-    if (!retried && decrypted && decrypted.result?.code === 4003) {
-      wlog.warn('Knox error 4003: refreshing encryption key and retrying');
-      const newKey = await refreshEncryptionKey();
-      if (newKey) {
-        return sendSingleMessage(chatroomId, message, true);
-      }
     }
 
     wlog.error('Knox sendMessage failed', { chatroomId, response: decrypted });
