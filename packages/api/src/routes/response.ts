@@ -45,12 +45,12 @@ responseRouter.post('/', async (req, res) => {
       res.json({ success: true });
     } else {
       stats.messagesFailed++;
-      recordError('/api/response', 'Knox API call failed');
+      recordError('/api/response', `Knox API failed | room:${chatroomId} | msg:"${String(message).slice(0, 80)}"`);
       res.status(502).json({ success: false, error: 'Knox API call failed' });
     }
   } catch (err) {
     stats.messagesFailed++;
-    recordError('/api/response', String(err));
+    recordError('/api/response', `${String(err)} | room:${chatroomId} | msg:"${String(message).slice(0, 80)}"`);
     wlog.error('Response: Knox send failed', { chatroomId, error: String(err) });
     res.status(500).json({ success: false, error: String(err) });
   }

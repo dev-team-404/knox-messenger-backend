@@ -584,7 +584,7 @@ function renderErrors(errors) {
   document.getElementById('error-count').textContent = errors.length;
   if (!errors.length) { document.getElementById('errors-list').innerHTML = '<div class="empty">에러 없음</div>'; return; }
   document.getElementById('errors-list').innerHTML = errors.map(e =>
-    '<div class="error-row"><span class="error-time">'+e.time.slice(11,19)+'</span> <span class="error-path">'+e.path+'</span> <span class="error-msg">'+e.error.slice(0,120)+'</span></div>'
+    '<div class="error-row"><span class="error-time">'+e.time.slice(11,19)+'</span> <span class="error-path">'+e.path+'</span> <span class="error-msg">'+e.error.slice(0,300)+'</span></div>'
   ).join('');
 }
 

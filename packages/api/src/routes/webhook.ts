@@ -119,7 +119,7 @@ webhookRouter.post(
         stats.webhooksForwarded++;
       }).catch((err) => {
         stats.webhooksFailed++;
-        recordError('/message→bot', String(err));
+        recordError('/message→bot', `${String(err)} | endpoint:${bot.endpoint} | sender:${senderKnoxId || sender}`);
         wlog.error('Webhook: failed to forward to bot', {
           endpoint: bot.endpoint,
           error: String(err),
