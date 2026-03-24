@@ -257,8 +257,10 @@ export class WSManager {
       // Knox rejected (chatroom gone/invalid) → create new chatroom and retry once
       if (!success) {
         wlog.warn('handleResponse: sendMessage failed, recreating chatroom', { chatroomId, knoxUserId: session.knoxUserId });
+        // Invalidate stale chatroom before creating new one
+        session.chatroomId = null;
         const newChatroomId = await this.getOrCreateChatroom(session.knoxUserId);
-        if (newChatroomId && newChatroomId !== chatroomId) {
+        if (newChatroomId) {
           success = await sendMessage(String(newChatroomId), String(message));
           if (success) chatroomId = newChatroomId;
         }
@@ -266,7 +268,10 @@ export class WSManager {
 
       if (success) {
         stats.messagesSent++;
-        await this.cacheChatroom(session, chatroomId);
+        // Cache best-effort — don't let Redis failure override Knox success
+        this.cacheChatroom(session, chatroomId).catch((err) => {
+          wlog.warn('handleResponse: cacheChatroom failed (non-fatal)', { error: String(err) });
+        });
       } else {
         stats.messagesFailed++;
       }
