@@ -94,5 +94,31 @@ export async function heartbeat(knoxUserId: string): Promise<boolean> {
   if (!reg) return false;
   reg.lastSeen = new Date().toISOString();
   await redis.set(`${KEY_PREFIX}${knoxUserId}`, JSON.stringify(reg), 'EX', BOT_TTL);
+  // 정상 heartbeat → 실패 카운트 초기화
+  await redis.del(`${FAIL_PREFIX}${knoxUserId}`);
   return true;
+}
+
+// ─── Forward 실패 카운트 관리 ───
+
+const FAIL_PREFIX = 'bot-fail:';
+const MAX_FORWARD_FAILURES = 3;
+
+/** 봇 forward 실패 기록. 연속 3회 실패 시 봇 자동 제거 후 true 반환 */
+export async function recordForwardFailure(knoxUserId: string): Promise<boolean> {
+  const key = `${FAIL_PREFIX}${knoxUserId}`;
+  const count = await redis.incr(key);
+  await redis.expire(key, 600); // 10분 내 연속 실패만 카운트
+  if (count >= MAX_FORWARD_FAILURES) {
+    await unregisterBot(knoxUserId);
+    await redis.del(key);
+    wlog.warn('Bot auto-removed after consecutive forward failures', { knoxUserId, failCount: count });
+    return true;
+  }
+  return false;
+}
+
+/** 봇 forward 성공 시 실패 카운트 초기화 */
+export async function resetForwardFailure(knoxUserId: string): Promise<void> {
+  await redis.del(`${FAIL_PREFIX}${knoxUserId}`);
 }

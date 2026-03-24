@@ -35,6 +35,22 @@ registerRouter.post('/register', async (req, res) => {
     return;
   }
 
+  // 봇 endpoint 접근 가능 여부 검증 (GET /health)
+  try {
+    const healthRes = await fetch(`${endpoint}/health`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!healthRes.ok) {
+      wlog.warn('Register: health check failed (non-ok)', { knoxUserId, endpoint, status: healthRes.status });
+      res.status(400).json({ error: `Bot health check failed (HTTP ${healthRes.status}). Endpoint unreachable.` });
+      return;
+    }
+  } catch (err) {
+    wlog.warn('Register: health check failed', { knoxUserId, endpoint, error: String(err) });
+    res.status(400).json({ error: `Bot endpoint unreachable: ${String(err)}` });
+    return;
+  }
+
   await registerBot(String(knoxUserId), String(endpoint));
   res.json({ success: true, knoxUserId, endpoint });
 });

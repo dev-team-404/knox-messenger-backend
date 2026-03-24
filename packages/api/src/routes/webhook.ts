@@ -11,7 +11,7 @@
 
 import { Router, text as expressText } from 'express';
 import { decryptPayload } from '../services/knox-crypto.js';
-import { getBot } from '../services/bot-registry.js';
+import { getBot, recordForwardFailure, resetForwardFailure } from '../services/bot-registry.js';
 import { sendMessage } from '../services/knox-api.js';
 import { wlog } from '../middleware/logger.js';
 import { config } from '../config.js';
@@ -88,8 +88,10 @@ webhookRouter.post(
 
       // senderKnoxId(SSO loginid)로 먼저 조회, 없으면 sender(Knox numeric ID)로 fallback
       let bot = senderKnoxId ? await getBot(senderKnoxId) : null;
+      let botRegistryKey = senderKnoxId || '';
       if (!bot) {
         bot = await getBot(String(sender));
+        botRegistryKey = String(sender);
       }
       if (!bot) {
         wlog.warn('Webhook: no bot registered for sender', { sender, senderKnoxId });
@@ -117,13 +119,19 @@ webhookRouter.post(
 
       forwardToBot(bot.endpoint, taskRequest).then(() => {
         stats.webhooksForwarded++;
-      }).catch((err) => {
+        resetForwardFailure(botRegistryKey).catch(() => {});
+      }).catch(async (err) => {
         stats.webhooksFailed++;
         recordError('/message→bot', `${String(err)} | endpoint:${bot.endpoint} | sender:${senderKnoxId || sender}`);
         wlog.error('Webhook: failed to forward to bot', {
           endpoint: bot.endpoint,
           error: String(err),
         });
+        // 연속 실패 시 봇 자동 제거 + 사용자 알림
+        const removed = await recordForwardFailure(botRegistryKey).catch(() => false);
+        if (removed) {
+          sendMessage(String(chatroomId), '⚠️ Nexus Bot 응답 없음 (3회 연속 실패).\n봇이 오프라인으로 전환되었습니다.\n\nPC에서 Nexus Bot을 재시작하고 "자비스 연결" 버튼을 눌러주세요.').catch(() => {});
+        }
       });
 
       res.sendStatus(200);
