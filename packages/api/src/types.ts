@@ -87,7 +87,7 @@ export interface WSAuthPayload {
 }
 
 export interface WSResponsePayload {
-  chatroomId: string;
+  chatroomId?: string;  // optional hint — server manages chatroom routing
   message: string;
 }
 

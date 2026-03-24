@@ -34,6 +34,7 @@ interface BotSession {
   connectedAt: number;
   lastActivity: number;
   authenticated: boolean;
+  chatroomId: string | null;   // cached active chatroom (managed by server)
 }
 
 // ─── Constants ───
@@ -47,6 +48,7 @@ const PENDING_FLUSH_DELAY_MS = 100; // gap between pending messages
 // ─── Redis Key Helpers ───
 
 const sessionKey = (uid: string) => `ws-session:${uid}`;
+const chatroomKey = (uid: string) => `ws-chatroom:${uid}`;
 const pendingListKey = (uid: string) => `ws-pending:${uid}`;
 const pendingItemKey = (mid: string) => `ws-pending-item:${mid}`;
 const ackKey = (mid: string) => `ws-ack:${mid}`;
@@ -85,6 +87,7 @@ export class WSManager {
       connectedAt: Date.now(),
       lastActivity: Date.now(),
       authenticated: false,
+      chatroomId: null,
     };
 
     // Auth timeout — must send 'auth' within 5s
@@ -180,7 +183,11 @@ export class WSManager {
     // Also register in bot registry (compatibility)
     await registerBot(knoxUserId, `ws://${this.serverId}/${session.sessionId}`);
 
-    wlog.info('WS authenticated', { knoxUserId, sessionId: session.sessionId });
+    // Load cached chatroomId from Redis
+    const cachedChatroom = await redis.get(chatroomKey(knoxUserId));
+    session.chatroomId = cachedChatroom || null;
+
+    wlog.info('WS authenticated', { knoxUserId, sessionId: session.sessionId, cachedChatroomId: session.chatroomId });
 
     this.send(session.ws, {
       type: 'auth_ok',
@@ -218,27 +225,96 @@ export class WSManager {
   // ─── Bot → Knox Response ───
 
   private async handleResponse(session: BotSession, envelope: WSEnvelope): Promise<void> {
-    const { chatroomId, message } = envelope.payload as WSResponsePayload;
+    const { chatroomId: clientHint, message } = envelope.payload as WSResponsePayload;
+
+    // Resolve chatroomId: session cache → Redis cache → client hint
+    let chatroomId = session.chatroomId;
+    if (!chatroomId) {
+      const redis = getRedis();
+      chatroomId = await redis.get(chatroomKey(session.knoxUserId)) || null;
+    }
+    if (!chatroomId && clientHint) {
+      chatroomId = String(clientHint);
+    }
+
+    // No chatroom at all → create one
+    if (!chatroomId) {
+      wlog.info('handleResponse: no chatroom cached, creating new', { knoxUserId: session.knoxUserId });
+      chatroomId = await this.getOrCreateChatroom(session.knoxUserId);
+      if (!chatroomId) {
+        stats.messagesFailed++;
+        this.send(session.ws, {
+          type: 'response_ack', id: crypto.randomUUID(), timestamp: Date.now(),
+          payload: { messageId: envelope.id, success: false, error: 'No chatroom available and creation failed' },
+        });
+        return;
+      }
+    }
+
     try {
-      const success = await sendMessage(String(chatroomId), String(message));
-      if (success) stats.messagesSent++;
-      else stats.messagesFailed++;
+      let success = await sendMessage(String(chatroomId), String(message));
+
+      // Knox rejected (chatroom gone/invalid) → create new chatroom and retry once
+      if (!success) {
+        wlog.warn('handleResponse: sendMessage failed, recreating chatroom', { chatroomId, knoxUserId: session.knoxUserId });
+        const newChatroomId = await this.getOrCreateChatroom(session.knoxUserId);
+        if (newChatroomId && newChatroomId !== chatroomId) {
+          success = await sendMessage(String(newChatroomId), String(message));
+          if (success) chatroomId = newChatroomId;
+        }
+      }
+
+      if (success) {
+        stats.messagesSent++;
+        await this.cacheChatroom(session, chatroomId);
+      } else {
+        stats.messagesFailed++;
+      }
+
       this.send(session.ws, {
-        type: 'response_ack',
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        payload: { messageId: envelope.id, success },
+        type: 'response_ack', id: crypto.randomUUID(), timestamp: Date.now(),
+        payload: { messageId: envelope.id, success, chatroomId },
       });
     } catch (err) {
       stats.messagesFailed++;
       recordError('ws:response', String(err), { chatroomId: String(chatroomId) });
       this.send(session.ws, {
-        type: 'response_ack',
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
+        type: 'response_ack', id: crypto.randomUUID(), timestamp: Date.now(),
         payload: { messageId: envelope.id, success: false, error: String(err) },
       });
     }
+  }
+
+  /** Resolve loginId → Knox numeric ID → createChatroom */
+  private async getOrCreateChatroom(knoxUserId: string): Promise<string | null> {
+    try {
+      let resolvedId = knoxUserId;
+      if (!/^\d+$/.test(resolvedId)) {
+        const numericId = await searchUserByLoginId(resolvedId);
+        if (!numericId) {
+          wlog.error('getOrCreateChatroom: user not found', { knoxUserId });
+          return null;
+        }
+        resolvedId = numericId;
+      }
+      const result = await createChatroom([resolvedId], 0);
+      if (result?.chatroomId) {
+        wlog.info('getOrCreateChatroom: created', { knoxUserId, chatroomId: result.chatroomId });
+        return result.chatroomId;
+      }
+      wlog.error('getOrCreateChatroom: createChatroom returned null', { knoxUserId });
+      return null;
+    } catch (err) {
+      wlog.error('getOrCreateChatroom: error', { knoxUserId, error: String(err) });
+      return null;
+    }
+  }
+
+  /** Update chatroom cache in both session and Redis */
+  private async cacheChatroom(session: BotSession, chatroomId: string): Promise<void> {
+    session.chatroomId = chatroomId;
+    const redis = getRedis();
+    await redis.set(chatroomKey(session.knoxUserId), chatroomId, 'EX', PENDING_TTL);
   }
 
   // ─── Bot → Knox Initiate Conversation ───
@@ -266,6 +342,8 @@ export class WSManager {
         });
         return;
       }
+      // Cache the new chatroom
+      await this.cacheChatroom(session, result.chatroomId);
       const sent = await sendMessage(result.chatroomId, message);
       this.send(session.ws, {
         type: 'initiate_ack', id: crypto.randomUUID(), timestamp: Date.now(),
@@ -333,6 +411,14 @@ export class WSManager {
 
   async deliverToBot(knoxUserId: string, taskRequest: BotTaskRequest, messageId: string): Promise<boolean> {
     const session = this.sessions.get(knoxUserId);
+
+    // Cache chatroomId from incoming message (server-managed)
+    if (taskRequest.chatroomId) {
+      if (session) session.chatroomId = taskRequest.chatroomId;
+      const redis = getRedis();
+      await redis.set(chatroomKey(knoxUserId), taskRequest.chatroomId, 'EX', PENDING_TTL);
+      wlog.info('Chatroom cached from incoming message', { knoxUserId, chatroomId: taskRequest.chatroomId });
+    }
 
     if (session && session.ws.readyState === WebSocket.OPEN) {
       // Direct delivery via WebSocket
