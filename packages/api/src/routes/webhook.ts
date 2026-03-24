@@ -16,6 +16,7 @@ import { sendMessage } from '../services/knox-api.js';
 import { wlog } from '../middleware/logger.js';
 import { config } from '../config.js';
 import { stats, recordError, trackSession } from '../services/stats.js';
+import { wsManager } from '../services/ws-instance.js';
 import type { KnoxWebhookPayload, BotTaskRequest } from '../types.js';
 
 export const webhookRouter = Router();
@@ -117,9 +118,18 @@ webhookRouter.post(
         isIntro: botNotiType === 'INTRO',
       };
 
-      forwardToBot(bot.endpoint, taskRequest).then(() => {
-        stats.webhooksForwarded++;
-        resetForwardFailure(botRegistryKey).catch(() => {});
+      // WebSocket 우선 전달, 실패 시 HTTP fallback
+      const wsMessageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      wsManager.deliverToBot(botRegistryKey, taskRequest, wsMessageId).then((delivered) => {
+        if (delivered) {
+          stats.webhooksForwarded++;
+          resetForwardFailure(botRegistryKey).catch(() => {});
+        } else {
+          // Bot offline — message stored in Redis pending
+          stats.webhooksFailed++;
+          wlog.warn('Webhook: bot offline, message queued', { knoxUserId: botRegistryKey, messageId: wsMessageId });
+          sendMessage(String(chatroomId), '⚠️ Nexus Bot이 오프라인 상태입니다.\n메시지는 저장되었으며, 봇 재연결 시 자동으로 전달됩니다.').catch(() => {});
+        }
       }).catch(async (err) => {
         stats.webhooksFailed++;
         recordError('/message→bot', String(err), {
@@ -128,11 +138,10 @@ webhookRouter.post(
           endpoint: bot.endpoint,
           chatroomId: String(chatroomId),
         });
-        wlog.error('Webhook: failed to forward to bot', {
-          endpoint: bot.endpoint,
+        wlog.error('Webhook: failed to deliver to bot', {
+          knoxUserId: botRegistryKey,
           error: String(err),
         });
-        // 연속 실패 시 봇 자동 제거 + 사용자 알림
         const removed = await recordForwardFailure(botRegistryKey).catch(() => false);
         if (removed) {
           sendMessage(String(chatroomId), '⚠️ Nexus Bot 응답 없음 (3회 연속 실패).\n봇이 오프라인으로 전환되었습니다.\n\nPC에서 Nexus Bot을 재시작하고 "자비스 연결" 버튼을 눌러주세요.').catch(() => {});

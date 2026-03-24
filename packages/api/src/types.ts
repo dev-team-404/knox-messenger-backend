@@ -67,3 +67,56 @@ export interface KnoxCreateChatroomBody {
   receivers: number[];
   chatroomTitle?: string;
 }
+
+// ─── WebSocket Protocol ───
+
+export type WSClientMessageType = 'auth' | 'response' | 'initiate' | 'heartbeat' | 'ack';
+export type WSServerMessageType = 'auth_ok' | 'auth_error' | 'message' | 'response_ack' | 'initiate_ack' | 'pending_messages' | 'heartbeat_ack';
+
+export interface WSEnvelope {
+  type: WSClientMessageType | WSServerMessageType;
+  id: string;
+  timestamp: number;
+  payload: unknown;
+}
+
+export interface WSAuthPayload {
+  knoxUserId: string;
+  apiKey: string;
+  lastMessageId?: string;
+}
+
+export interface WSResponsePayload {
+  chatroomId: string;
+  message: string;
+}
+
+export interface WSInitiatePayload {
+  receiverId: string;
+  message: string;
+}
+
+export interface WSAckPayload {
+  messageId: string;
+}
+
+export interface WSPendingMessagesPayload {
+  messages: Array<{
+    id: string;
+    payload: BotTaskRequest;
+    timestamp: number;
+  }>;
+}
+
+export interface WSResponseAckPayload {
+  messageId: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface WSInitiateAckPayload {
+  messageId: string;
+  success: boolean;
+  chatroomId?: string;
+  error?: string;
+}

@@ -5,6 +5,8 @@ import { config } from './config.js';
 import { wlog, requestLogger } from './middleware/logger.js';
 import { initRedis } from './services/bot-registry.js';
 import { initKnoxApi } from './services/knox-api.js';
+import { wsManager } from './services/ws-instance.js';
+import { initWSPubSub } from './services/ws-pubsub.js';
 import { webhookRouter } from './routes/webhook.js';
 import { registerRouter } from './routes/register.js';
 import { responseRouter } from './routes/response.js';
@@ -46,17 +48,24 @@ async function main(): Promise<void> {
       knoxDeviceId: config.knox.deviceId ? 'set' : 'NOT SET',
       knoxEncryptionKey: config.knox.encryptionKey ? 'set' : 'NOT SET',
       botApiKey: config.botApiKey ? 'set' : 'NOT SET',
+      serverId: process.env.SERVER_ID || 'default',
     });
     if (!config.botApiKey) {
       wlog.warn('⚠️  BOT_API_KEY is not set — bot registration/response API is UNAUTHENTICATED');
     }
   });
 
+  // Attach WebSocket server to HTTP server
+  wsManager.attach(server);
+  initWSPubSub(wsManager);
+  wlog.info('WebSocket server initialized', { serverId: process.env.SERVER_ID || 'default' });
+
   server.keepAliveTimeout = 75000;
   server.headersTimeout = 76000;
 
-  const shutdown = () => {
+  const shutdown = async () => {
     wlog.info('Shutting down gracefully...');
+    await wsManager.shutdown();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 10000);
   };

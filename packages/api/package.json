@@ -14,10 +14,12 @@
     "express": "^4.21.2",
     "helmet": "^8.1.0",
     "ioredis": "^5.4.2",
-    "winston": "^3.17.0"
+    "winston": "^3.17.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
+    "@types/ws": "^8.5.13",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.0",
     "tsx": "^4.19.2",

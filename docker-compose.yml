@@ -85,10 +85,38 @@ services:
   api-blue:
     <<: *api-common
     container_name: knox-msg-api-blue
+    environment:
+      <<: *runtime-env
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      KNOX_API_BASE_URL: ${KNOX_API_BASE_URL:-}
+      KNOX_ACCESS_TOKEN: ${KNOX_ACCESS_TOKEN:-}
+      KNOX_SYSTEM_ID: ${KNOX_SYSTEM_ID:-}
+      KNOX_DEVICE_ID: ${KNOX_DEVICE_ID:-}
+      KNOX_ENCRYPTION_KEY: ${KNOX_ENCRYPTION_KEY:-}
+      BOT_API_KEY: ${BOT_API_KEY:-}
+      API_PORT: 3000
+      SERVER_ID: blue
+      SSO_BASE_URL: ${SSO_BASE_URL:-https://genai.samsungds.net:36810}
+      DASHBOARD_ADMIN: ${DASHBOARD_ADMIN:-syngha.han}
 
   api-green:
     <<: *api-common
     container_name: knox-msg-api-green
+    environment:
+      <<: *runtime-env
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      KNOX_API_BASE_URL: ${KNOX_API_BASE_URL:-}
+      KNOX_ACCESS_TOKEN: ${KNOX_ACCESS_TOKEN:-}
+      KNOX_SYSTEM_ID: ${KNOX_SYSTEM_ID:-}
+      KNOX_DEVICE_ID: ${KNOX_DEVICE_ID:-}
+      KNOX_ENCRYPTION_KEY: ${KNOX_ENCRYPTION_KEY:-}
+      BOT_API_KEY: ${BOT_API_KEY:-}
+      API_PORT: 3000
+      SERVER_ID: green
+      SSO_BASE_URL: ${SSO_BASE_URL:-https://genai.samsungds.net:36810}
+      DASHBOARD_ADMIN: ${DASHBOARD_ADMIN:-syngha.han}
 
   nginx:
     build:

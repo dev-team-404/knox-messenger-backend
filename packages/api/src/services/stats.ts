@@ -20,6 +20,10 @@ export const stats = {
   webhooksFailed: 0,
   messagesSent: 0,
   messagesFailed: 0,
+  wsConnectionsTotal: 0,
+  wsDisconnectsTotal: 0,
+  wsAuthFailures: 0,
+  wsPendingDelivered: 0,
   errors: [] as ErrorRecord[],
   activeSessions: new Map<string, { loginId: string; lastActive: string; messageCount: number }>(),
 };

@@ -15,6 +15,7 @@ import { getRedis } from '../services/bot-registry.js';
 import { sendMessage, searchUserByLoginId, createChatroom } from '../services/knox-api.js';
 import { stats } from '../services/stats.js';
 import { wlog } from '../middleware/logger.js';
+import { wsManager } from '../services/ws-instance.js';
 
 export const dashboardRouter = Router();
 
@@ -72,13 +73,33 @@ dashboardRouter.get('/api/stats', async (req: Request, res: Response) => {
       online: now - new Date(b.lastSeen).getTime() < 10 * 60 * 1000,
     }));
 
+    // WebSocket live connections
+    const wsStats = wsManager.getConnectionStats();
+
+    // Count pending messages in Redis
+    let pendingTotal = 0;
+    try {
+      const pendingKeys = await redis.keys('ws-pending:*');
+      for (const key of pendingKeys) {
+        pendingTotal += await redis.llen(key);
+      }
+    } catch { /* ignore */ }
+
+    // Enhance bot online status: WS session = online
+    const wsConnectedUsers = new Set(wsStats.sessions.map(s => s.knoxUserId));
+    const botsEnhanced = botsWithStatus.map(b => ({
+      ...b,
+      online: wsConnectedUsers.has(b.knoxUserId) || b.online,
+      wsConnected: wsConnectedUsers.has(b.knoxUserId),
+    }));
+
     res.json({
       server: {
         uptime: process.uptime(),
         redisMemory: usedMemory,
         redisClients: Number(connectedClients),
         botsRegistered: bots.length,
-        botsOnline: botsWithStatus.filter(b => b.online).length,
+        botsOnline: botsEnhanced.filter(b => b.online).length,
       },
       messages: {
         webhooksReceived: stats.webhooksReceived,
@@ -87,7 +108,16 @@ dashboardRouter.get('/api/stats', async (req: Request, res: Response) => {
         messagesSent: stats.messagesSent,
         messagesFailed: stats.messagesFailed,
       },
-      bots: botsWithStatus,
+      ws: {
+        connectionsTotal: stats.wsConnectionsTotal,
+        disconnectsTotal: stats.wsDisconnectsTotal,
+        authFailures: stats.wsAuthFailures,
+        pendingDelivered: stats.wsPendingDelivered,
+        liveConnections: wsStats.total,
+        sessions: wsStats.sessions,
+        pendingMessages: pendingTotal,
+      },
+      bots: botsEnhanced,
       sessions: activeSessions,
       errors: stats.errors.slice(-30).reverse(),
     });
