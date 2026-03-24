@@ -122,7 +122,12 @@ webhookRouter.post(
         resetForwardFailure(botRegistryKey).catch(() => {});
       }).catch(async (err) => {
         stats.webhooksFailed++;
-        recordError('/message→bot', `${String(err)} | endpoint:${bot.endpoint} | sender:${senderKnoxId || sender}`);
+        recordError('/message→bot', String(err), {
+          sender: senderKnoxId || String(sender),
+          senderName: senderName || undefined,
+          endpoint: bot.endpoint,
+          chatroomId: String(chatroomId),
+        });
         wlog.error('Webhook: failed to forward to bot', {
           endpoint: bot.endpoint,
           error: String(err),
@@ -136,7 +141,7 @@ webhookRouter.post(
 
       res.sendStatus(200);
     } catch (err) {
-      recordError('/message', String(err));
+      recordError('/message', String(err), { errorType: 'parse_error' });
       wlog.error('Webhook: unhandled error', { error: String(err) });
       res.sendStatus(200);
     }

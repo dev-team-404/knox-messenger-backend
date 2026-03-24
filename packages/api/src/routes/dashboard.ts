@@ -347,18 +347,46 @@ function getDashboardHTML(tkn: string): string {
   .session-meta { font-size: 11px; color: var(--text-secondary); }
   .session-count { font-size: 12px; color: var(--accent-blue); font-weight: 600; }
 
-  /* ─── Error Row ─── */
-  .error-row {
-    padding: 10px 20px;
-    border-bottom: 1px solid var(--border);
-    font-family: monospace;
-    font-size: 11px;
-    line-height: 1.6;
+  /* ─── Error Table ─── */
+  .error-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .error-table th {
+    text-align: left; padding: 8px 12px; color: var(--text-secondary);
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border); font-weight: 600;
+    position: sticky; top: 0; background: var(--bg-card); z-index: 1;
   }
-  .error-row:last-child { border-bottom: none; }
-  .error-time { color: var(--text-tertiary); }
-  .error-path { color: var(--accent-yellow); }
-  .error-msg { color: var(--accent-red); }
+  .error-table td {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    font-family: monospace; vertical-align: top;
+  }
+  .error-table tr:hover td { background: var(--bg-card-hover); }
+  .error-time { color: var(--text-tertiary); white-space: nowrap; }
+  .error-type {
+    font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 4px;
+    display: inline-block; white-space: nowrap;
+  }
+  .error-type.timeout { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+  .error-type.connection_refused { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+  .error-type.connection_reset { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
+  .error-type.http_error { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
+  .error-type.knox_api_error { background: rgba(188,140,255,0.15); color: var(--accent-purple); }
+  .error-type.health_check_failed { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+  .error-type.parse_error { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
+  .error-type.unknown { background: rgba(139,148,158,0.15); color: var(--text-secondary); }
+  .error-sender { color: var(--accent-blue); white-space: nowrap; }
+  .error-endpoint { color: var(--text-tertiary); font-size: 10px; }
+  .error-detail { color: var(--accent-red); word-break: break-all; max-width: 400px; }
+  .error-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .error-filter-btn {
+    font-size: 10px; padding: 3px 8px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
+    transition: all 0.15s;
+  }
+  .error-filter-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
+  .error-filter-btn.active { background: var(--accent-blue); color: white; border-color: var(--accent-blue); }
+  .error-summary { display: flex; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .error-summary-item { font-size: 11px; color: var(--text-secondary); }
+  .error-summary-item strong { color: var(--text-primary); }
 
   /* ─── Send Message Panel ─── */
   .send-section {
@@ -497,8 +525,10 @@ function getDashboardHTML(tkn: string): string {
     <div class="section">
       <div class="section-header">
         <div class="section-title">최근 에러 <span class="section-count" id="error-count">0</span></div>
+        <div class="error-filters" id="error-filters"></div>
       </div>
-      <div class="section-body" id="errors-list"><div class="empty">에러 없음</div></div>
+      <div id="error-summary" class="error-summary"></div>
+      <div class="section-body" id="errors-list" style="max-height:500px"><div class="empty">에러 없음</div></div>
     </div>
   </div>
 </div>
@@ -580,12 +610,66 @@ function renderSessions(sessions) {
   ).join('');
 }
 
+let allErrors = [];
+let errorFilter = 'all';
+
 function renderErrors(errors) {
+  allErrors = errors;
   document.getElementById('error-count').textContent = errors.length;
-  if (!errors.length) { document.getElementById('errors-list').innerHTML = '<div class="empty">에러 없음</div>'; return; }
-  document.getElementById('errors-list').innerHTML = errors.map(e =>
-    '<div class="error-row"><span class="error-time">'+e.time.slice(11,19)+'</span> <span class="error-path">'+e.path+'</span> <span class="error-msg">'+e.error.slice(0,300)+'</span></div>'
-  ).join('');
+
+  // 타입별 집계
+  const typeCounts = {};
+  const senderCounts = {};
+  errors.forEach(e => {
+    const t = e.errorType || 'unknown';
+    typeCounts[t] = (typeCounts[t] || 0) + 1;
+    if (e.sender) senderCounts[e.sender] = (senderCounts[e.sender] || 0) + 1;
+  });
+
+  // 필터 버튼
+  const types = Object.keys(typeCounts).sort();
+  document.getElementById('error-filters').innerHTML =
+    '<button class="error-filter-btn '+(errorFilter==='all'?'active':'')+'" onclick="setErrorFilter(\\'all\\')">전체 ('+errors.length+')</button>' +
+    types.map(t =>
+      '<button class="error-filter-btn '+(errorFilter===t?'active':'')+'" onclick="setErrorFilter(\\''+t+'\\')">'+t+' ('+typeCounts[t]+')</button>'
+    ).join('');
+
+  // 사용자별 요약
+  const topSenders = Object.entries(senderCounts).sort((a,b) => b[1] - a[1]).slice(0, 5);
+  document.getElementById('error-summary').innerHTML = topSenders.length
+    ? topSenders.map(([s,c]) => '<div class="error-summary-item"><strong>'+s+'</strong>: '+c+'건</div>').join('')
+    : '';
+
+  // 필터 적용
+  const filtered = errorFilter === 'all' ? errors : errors.filter(e => e.errorType === errorFilter);
+  renderErrorTable(filtered);
+}
+
+function setErrorFilter(type) {
+  errorFilter = type;
+  renderErrors(allErrors);
+}
+
+function renderErrorTable(errors) {
+  if (!errors.length) {
+    document.getElementById('errors-list').innerHTML = '<div class="empty">에러 없음</div>';
+    return;
+  }
+  document.getElementById('errors-list').innerHTML =
+    '<table class="error-table"><thead><tr>' +
+    '<th>시간</th><th>타입</th><th>사용자</th><th>경로</th><th>엔드포인트</th><th>상세</th>' +
+    '</tr></thead><tbody>' +
+    errors.map(e =>
+      '<tr>' +
+      '<td class="error-time">'+(e.time||'').slice(11,19)+'</td>' +
+      '<td><span class="error-type '+(e.errorType||'unknown')+'">'+(e.errorType||'unknown')+'</span></td>' +
+      '<td class="error-sender">'+(e.sender||'-')+(e.senderName?' ('+e.senderName+')':'')+'</td>' +
+      '<td style="color:var(--accent-yellow)">'+(e.path||'')+'</td>' +
+      '<td class="error-endpoint">'+(e.endpoint||'-')+'</td>' +
+      '<td class="error-detail">'+(e.detail||e.error||'').slice(0,200)+'</td>' +
+      '</tr>'
+    ).join('') +
+    '</tbody></table>';
 }
 
 // 메시지 전송 드롭다운 업데이트
